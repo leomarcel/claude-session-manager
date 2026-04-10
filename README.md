@@ -29,41 +29,62 @@ Claude Session Manager is a graphical desktop application built for developers w
 - **Auto-detection** of all active Claude Code sessions (running processes + stored sessions)
 - **Session resume** — click a project and it launches `claude --resume <session-id>` automatically
 - **Real-time status** — see which sessions are active, idle, or busy
-- **Session metadata** — model used, message count, summary, git branch
+- **Session metadata** — model used, first prompt, summary, git branch
+- **Rename & archive** — custom names for sessions, archive old ones
+- **Search & filter** — search by name/path/prompt, filter by project or date (today/week)
+- **Grouped by project** — sessions organized under project headers with collapsible groups
 
 ### Integrated Terminal
 - **Embedded terminal** (xterm.js + node-pty) runs Claude Code directly inside the app
-- **Full color support** — 256-color and truecolor themes
-- **Automatic resume** — reconnects to the most recent conversation for each project
+- **Multi-tab** — multiple terminals per project (Claude + shell tabs side by side)
+- **Lazy loading** — terminals are only created when you click a session, not all at startup
+- **Persistent tabs** — terminal tabs are saved and restored across app restarts
+- **Full color support** — 256-color and truecolor, configurable presets (Standard/iTerm2/Minimal)
 
 ### Git Integration
 - **Modified files panel** — live `git status` showing staged/unstaged changes
-- **Status badges** — M (modified), A (added), D (deleted), R (renamed), ? (untracked)
+- **Inline diff viewer** — click a file to see the git diff in a new terminal tab
+- **Worktree modal** — visual list of all worktrees with branch and commit info
+- **Commit & PR** — run `git commit` or `gh pr create` in embedded shell tabs
 - **Branch display** in the terminal header
 
 ### Quick Actions
-- **Commit** — opens interactive `git add -p && git commit`
-- **Create PR** — launches `gh pr create --web`
-- **Worktree** — manage git worktrees
+- **Commit** — opens `git add -p && git commit` in a shell tab
+- **Create PR** — runs `gh pr create` in a shell tab
+- **Worktree** — visual modal with worktree list
 - **Open in IDE** — PhpStorm, VS Code, Cursor, WebStorm, IntelliJ, Sublime Text, Zed, Xcode
-- **Open in Finder / Terminal**
+- **Open in Finder / Terminal** — configurable external terminal (Terminal.app, iTerm2, Warp, Alacritty)
 - **Fully customizable** — reorder, show/hide, per-IDE toggle
 
-### Settings
-- **Language** — French / English (i18n)
-- **IDE detection** — automatically scans for installed editors
-- **Custom actions** — toggle visibility and reorder all quick actions
-- **Refresh interval** — configurable polling frequency
+### Usage Tracking
+- **Real usage data** from Claude's `/usage` command (spawns a hidden session to capture stats)
+- **Session %** and **Week %** with color-coded progress bars
+- **Extra usage** — spent/budget display ($5.40/$20.00)
+- **Reset countdown** — next billing window reset time, localized (5am / 5h00)
+- **Rate limit detection** — shows badge when API is rate limited, uses cached data
+- **Manual refresh** button in the status bar
+- **Configurable refresh interval** (1-30 minutes)
 
-### Token Usage
-- **Credits bar** in the status bar showing plan, usage %, remaining tokens, and reset date
-- **Color-coded** — green/yellow/red based on consumption
+### Settings
+- **Language** — English / French (i18n, all strings translated)
+- **Theme** — Dark / Light
+- **Layout** — sessions sidebar left or right, toggle file/action panels
+- **Terminal** — preset (Standard/iTerm2/Minimal), font size, external terminal choice
+- **IDE detection** — automatically scans for installed editors
+- **Notifications** — macOS native notifications when Claude finishes a task
+- **Tray icon** — enable/disable menu bar icon
+- **Demo mode** — fake data for testing and screenshots
+- **Session sorting** — list, by date, or grouped by project
+- **Usage refresh** — configurable interval for `/usage` polling
 
 ### Native macOS Experience
 - **Hidden inset title bar** with vibrancy
-- **Dark translucent theme** designed for macOS
+- **Dark & Light themes** designed for macOS
+- **Tray icon** — menu bar icon with session list, usage stats, quick access
+- **macOS menu bar** — Settings via Cmd+,, standard Edit/View/Window menus
+- **Splash screen** with Claude mascot on startup
+- **macOS notifications** when sessions finish tasks
 - **SF Mono** font for the terminal
-- **Lightweight** — reads session files directly, minimal subprocess usage
 
 ---
 
@@ -77,7 +98,7 @@ Claude Session Manager is a graphical desktop application built for developers w
 ### Download DMG (recommended)
 
 1. Go to the [Releases](https://github.com/leomarcel/claude-session-manager/releases) page
-2. Download `Claude.Session.Manager-x.x.x-arm64.dmg` (Apple Silicon) or the universal build
+2. Download `Claude.Session.Manager-x.x.x-arm64.dmg` (Apple Silicon)
 3. Open the DMG and drag **Claude Session Manager** to your Applications folder
 4. Launch from Applications or Spotlight
 
@@ -105,7 +126,7 @@ npm start
 ### Build your own DMG
 
 ```bash
-# Full build → outputs to release/ folder
+# Full build -> outputs to release/ folder
 npm run dist:dmg
 
 # Or use the build script
@@ -131,35 +152,42 @@ npm run dev:main -- --dev
 
 ```
 src/
-├── main/                    # Electron main process
-│   ├── main.ts              # App entry, IPC handlers, window creation
-│   ├── preload.ts           # Secure context bridge (contextIsolation)
-│   ├── sessionDetector.ts   # Reads ~/.claude/ to find sessions
-│   ├── gitManager.ts        # Git status, branch, PR/commit actions
-│   ├── ptyManager.ts        # node-pty terminal management
-│   ├── tokenTracker.ts      # Claude API usage tracking
-│   └── settingsStore.ts     # Persistent settings (~/.claude-session-manager/)
-└── renderer/                # React frontend
-    ├── App.tsx              # Root component with state management
-    ├── types.ts             # Shared TypeScript interfaces
-    ├── styles.css           # Full CSS with CSS variables
-    ├── i18n/                # Internationalization (fr/en)
+├── main/                      # Electron main process
+│   ├── main.ts                # App entry, IPC, window, tray, menus
+│   ├── preload.ts             # Secure context bridge (contextIsolation)
+│   ├── sessionDetector.ts     # Reads ~/.claude/ to find sessions
+│   ├── gitManager.ts          # Git status, branch, worktrees, diff
+│   ├── ptyManager.ts          # node-pty terminal management
+│   ├── tokenTracker.ts        # Usage tracking via /usage command
+│   ├── settingsStore.ts       # Persistent settings (~/.claude-session-manager/)
+│   ├── terminalStore.ts       # Terminal tab persistence
+│   ├── sessionMetaStore.ts    # Session rename & archive persistence
+│   └── logger.ts              # In-app logging system
+└── renderer/                  # React frontend
+    ├── App.tsx                # Root component with state management
+    ├── types.ts               # Shared TypeScript interfaces
+    ├── styles.css             # Full CSS with CSS variables (dark + light)
+    ├── demoData.ts            # Demo mode fake data
+    ├── i18n/                  # Internationalization (en/fr)
     └── components/
-        ├── SessionSidebar   # Left panel — session list
-        ├── TerminalPanel    # Center — embedded xterm.js
-        ├── RightSidebar     # Right — files + quick actions
-        ├── StatusBar        # Bottom — model, status, credits
-        ├── SettingsPanel    # Modal — language, IDEs, actions
-        └── Icons            # SVG icons (Claude, VS Code, etc.)
+        ├── SessionSidebar     # Left panel — session list, search, filters
+        ├── TerminalPanel      # Center — embedded xterm.js with tabs
+        ├── RightSidebar       # Right — files + quick actions + IDE picker
+        ├── StatusBar          # Bottom — model, status, credits, panel toggles
+        ├── SettingsPanel      # Modal — general, terminal, IDEs, actions, logs
+        ├── NewSessionModal    # Modal — create session from folder or project
+        ├── WorktreeModal      # Modal — visual worktree list
+        ├── DiffModal          # Modal — git diff viewer (colored)
+        └── Icons              # PNG + SVG icons (Claude, VS Code, etc.)
 ```
 
 ### How session detection works
 
 1. **Active processes**: reads `~/.claude/sessions/*.json` files (PID-indexed), checks if the process is alive via `process.kill(pid, 0)` (zero overhead)
-2. **Stored sessions**: scans `~/.claude/projects/<encoded-path>/` directories, reads `sessions-index.json` for metadata, or falls back to the latest `.jsonl` file
+2. **Stored sessions**: scans `~/.claude/projects/<encoded-path>/` directories, reads the latest `.jsonl` file for metadata (first prompt, model, branch)
 3. **Merging**: active process info enriches stored session data (status, PID)
 
-No heavy subprocess calls (`pgrep`, `lsof`, `ps`) — everything is read from the filesystem.
+No heavy subprocess calls — everything is read from the filesystem.
 
 ---
 
@@ -169,8 +197,18 @@ Settings are stored in `~/.claude-session-manager/settings.json`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `locale` | `"fr"` | Interface language (`"fr"` or `"en"`) |
+| `locale` | `"en"` | Interface language (`"en"` or `"fr"`) |
+| `theme` | `"dark"` | Theme (`"dark"` or `"light"`) |
 | `refreshInterval` | `15` | Session list refresh interval in seconds |
+| `usageRefreshInterval` | `5` | Usage check interval in minutes |
+| `sessionsSortMode` | `"project"` | Sort mode (`"default"`, `"date"`, `"project"`) |
+| `sessionsPosition` | `"left"` | Sidebar position (`"left"` or `"right"`) |
+| `terminalPreset` | `"iterm2"` | Terminal style (`"default"`, `"iterm2"`, `"minimal"`) |
+| `terminalFontSize` | `13` | Terminal font size (10-20) |
+| `externalTerminal` | `"terminal"` | External terminal app (`"terminal"`, `"iterm2"`, `"warp"`, `"alacritty"`) |
+| `notificationsEnabled` | `true` | macOS notifications when sessions finish |
+| `trayEnabled` | `true` | Menu bar tray icon |
+| `demoMode` | `false` | Show fake data for testing |
 | `ides` | auto-detected | List of IDEs with `enabled` toggle |
 | `quickActions` | all visible | Action visibility and ordering |
 
@@ -190,15 +228,16 @@ Contributions are welcome! Here's how to get started:
 ### Ideas for contributions
 
 - [ ] Windows / Linux support
-- [ ] Light theme
 - [ ] Drag-and-drop action reordering
-- [ ] Custom terminal themes
-- [ ] Session search/filter
-- [ ] Keyboard shortcuts
-- [ ] Tray icon with quick session switching
+- [ ] Keyboard shortcuts (Cmd+1/2/3 for sessions)
+- [ ] Session tags/labels with colors
 - [ ] Auto-updater
 - [ ] Session history timeline
-- [ ] Multi-language support (beyond fr/en)
+- [ ] Usage metrics graph per project
+- [ ] GitHub integration (PRs, issues in sidebar)
+- [ ] Saved prompt snippets
+- [ ] Split view (two terminals side by side)
+- [ ] More languages (beyond en/fr)
 
 ### Code style
 
