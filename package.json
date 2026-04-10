@@ -34,8 +34,18 @@
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
       "target": [
-        { "target": "dmg", "arch": ["universal"] },
-        { "target": "zip", "arch": ["universal"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
       ],
       "hardenedRuntime": false,
       "gatekeeperAssess": false
@@ -43,8 +53,16 @@
     "dmg": {
       "title": "Claude Session Manager",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     }
   },
@@ -65,6 +83,7 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "node-pty": "^1.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
