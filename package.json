@@ -1,0 +1,42 @@
+{
+  "name": "claude-session-manager",
+  "productName": "Claude Session Manager",
+  "version": "1.0.0",
+  "description": "Gestionnaire graphique de sessions Claude Code pour macOS",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "webpack --config webpack.renderer.config.js --mode production",
+    "copy:html": "cp src/renderer/index.html dist/renderer/index.html",
+    "build": "npm run build:main && npm run build:renderer && npm run copy:html",
+    "dev:main": "tsc -p tsconfig.main.json && electron .",
+    "dev:renderer": "webpack --config webpack.renderer.config.js --mode development --watch",
+    "start": "npm run build && electron .",
+    "dev": "concurrently \"npm run dev:renderer\" \"sleep 3 && npm run dev:main\""
+  },
+  "author": "Leo Marcel",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "concurrently": "^8.2.2",
+    "copy-webpack-plugin": "^14.0.0",
+    "css-loader": "^6.9.1",
+    "electron": "^28.2.0",
+    "electron-rebuild": "^3.2.9",
+    "style-loader": "^3.3.4",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-web-links": "^0.9.0"
+  }
+}
