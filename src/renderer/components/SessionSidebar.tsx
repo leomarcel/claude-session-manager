@@ -36,6 +36,10 @@ export function SessionSidebar({
   const [editValue, setEditValue] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; session: ClaudeSession } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterProjects, setFilterProjects] = useState<Set<string>>(new Set());
+  const [filterDate, setFilterDate] = useState<'all' | 'today' | 'week'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const statusLabel = (status: string) => {
     switch (status) {
@@ -77,7 +81,6 @@ export function SessionSidebar({
         onContextMenu={(e) => handleContextMenu(e, session)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <ClaudeIcon size={16} />
           {isEditing ? (
             <input
               className="session-rename-input"
@@ -136,32 +139,46 @@ export function SessionSidebar({
     );
   };
 
+  // Apply search + filters
+  const filteredSessions = sessions.filter(s => {
+    // Search
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const haystack = [
+        s.projectName, s.projectPath, s.customName || '',
+        s.firstPrompt || '', s.summary || '', s.model
+      ].join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    // Project filter
+    if (filterProjects.size > 0 && !filterProjects.has(s.projectPath)) return false;
+    // Date filter
+    if (filterDate === 'today') {
+      const today = new Date().toISOString().slice(0, 10);
+      return s.startTime.slice(0, 10) === today;
+    }
+    if (filterDate === 'week') {
+      const now = Date.now();
+      const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+      return new Date(s.startTime).getTime() > weekAgo;
+    }
+    return true;
+  });
+
   const renderGroupedByProject = (list: ClaudeSession[]) => {
-    // Group sessions by the last folder name in projectPath
-    const groups = new Map<string, { path: string; sessions: ClaudeSession[] }>();
+    // Group sessions by full projectPath (no collision on same-named folders)
+    const groups = new Map<string, { dirName: string; path: string; sessions: ClaudeSession[] }>();
     for (const s of list) {
-      const dirName = s.projectPath.split('/').pop() || s.projectPath;
       const existing = groups.get(s.projectPath);
       if (existing) {
         existing.sessions.push(s);
       } else {
-        groups.set(s.projectPath, { path: s.projectPath, sessions: [s] });
+        const dirName = s.projectPath.split('/').pop() || s.projectPath;
+        groups.set(s.projectPath, { dirName, path: s.projectPath, sessions: [s] });
       }
     }
 
-    // Merge entries with same folder name under the same projectPath
-    const merged = new Map<string, { dirName: string; path: string; sessions: ClaudeSession[] }>();
-    for (const [path, group] of groups) {
-      const dirName = path.split('/').pop() || path;
-      const existing = merged.get(dirName);
-      if (existing) {
-        existing.sessions.push(...group.sessions);
-      } else {
-        merged.set(dirName, { dirName, path, sessions: group.sessions });
-      }
-    }
-
-    return Array.from(merged.values()).map(group => (
+    return Array.from(groups.values()).map(group => (
       <div key={group.path} className="project-group">
         <div className="project-group-header" title={group.path}>
           <span className="project-group-folder">
@@ -183,13 +200,78 @@ export function SessionSidebar({
     <div className="sidebar-left" onClick={closeContextMenu}>
       <div className="sidebar-header">
         <div className="sidebar-header-row">
-          <span>{t(locale, 'sidebar.sessions')} ({sessions.length})</span>
-          <button className="refresh-btn" onClick={onRefresh} title={t(locale, 'sidebar.refresh')}>&#x21bb;</button>
+          <span>{t(locale, 'sidebar.sessions')} ({filteredSessions.length})</span>
+          <div style={{ display: 'flex', gap: 2 }}>
+            <button className={`refresh-btn ${showFilters ? 'active-filter' : ''}`} onClick={() => setShowFilters(p => !p)} title={t(locale, 'sidebar.filters')}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/></svg>
+            </button>
+            <button className="refresh-btn" onClick={onRefresh} title={t(locale, 'sidebar.refresh')}>&#x21bb;</button>
+          </div>
         </div>
       </div>
 
+      {/* Search bar */}
+      <div className="session-search">
+        <svg className="session-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          className="session-search-input"
+          type="text"
+          placeholder={t(locale, 'sidebar.search')}
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
+        {searchQuery && (
+          <button className="session-search-clear" onClick={() => setSearchQuery('')}>&times;</button>
+        )}
+      </div>
+
+      {/* Filter panel */}
+      {showFilters && (
+        <div className="filter-panel">
+          {/* Date filter */}
+          {sortMode === 'date' && (
+            <div className="filter-row">
+              {(['all', 'today', 'week'] as const).map(f => (
+                <button key={f} className={`filter-chip ${filterDate === f ? 'active' : ''}`} onClick={() => setFilterDate(f)}>
+                  {t(locale, `sidebar.filter${f.charAt(0).toUpperCase() + f.slice(1)}`)}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Project filter */}
+          {sortMode === 'project' && (() => {
+            const allProjects = [...new Set(sessions.map(s => s.projectPath))];
+            return (
+              <div className="filter-project-list">
+                <div className="filter-row">
+                  <button className={`filter-chip ${filterProjects.size === 0 ? 'active' : ''}`} onClick={() => setFilterProjects(new Set())}>
+                    {t(locale, 'sidebar.filterAll')}
+                  </button>
+                </div>
+                {allProjects.map(p => {
+                  const name = p.split('/').pop() || p;
+                  const isActive = filterProjects.has(p);
+                  return (
+                    <label key={p} className="filter-project-item">
+                      <input type="checkbox" checked={isActive} onChange={() => {
+                        setFilterProjects(prev => {
+                          const next = new Set(prev);
+                          if (next.has(p)) next.delete(p); else next.add(p);
+                          return next;
+                        });
+                      }} />
+                      <span>{name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       <div className="session-list">
-        {sessions.length === 0 ? (
+        {filteredSessions.length === 0 ? (
           <div style={{ padding: '20px 12px', textAlign: 'center' }}>
             <div style={{ opacity: 0.3, marginBottom: 10, display: 'flex', justifyContent: 'center' }}>
               <ClaudeIcon size={36} />
@@ -202,9 +284,9 @@ export function SessionSidebar({
             </div>
           </div>
         ) : sortMode === 'project' ? (
-          renderGroupedByProject(sessions)
+          renderGroupedByProject(filteredSessions)
         ) : (
-          sessions.map(s => renderSession(s))
+          filteredSessions.map(s => renderSession(s))
         )}
 
         {/* Archived sessions (collapsible) */}

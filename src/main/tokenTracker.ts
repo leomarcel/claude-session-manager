@@ -1,188 +1,265 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
+import { logger } from './logger';
+
+let pty: any;
+try { pty = require('node-pty'); } catch {}
 
 export interface TokenUsage {
   plan: string;
-  // Activity in the current billing window (last 24h)
-  userMessages: number;
-  assistantMessages: number;
-  toolCalls: number;
-  activeSessions: number;
-  // Totals
-  totalMessages: number;
-  // Legacy fields for UI compatibility
-  tokensUsed: number;
-  tokensLimit: number;
-  tokensRemaining: number;
+  rateLimited: boolean;
+  lastUpdated: string;
+  sessionPercent: number;
+  sessionReset: string;
+  weekPercent: number;
+  weekReset: string;
+  weekSonnetPercent: number;
+  extraPercent: number;
+  extraSpent: string;
+  extraBudget: string;
+  extraReset: string;
   percentUsed: number;
   resetDate: string;
   model: string;
+  raw: string;
 }
 
 export class TokenTracker {
-  private claudeDir: string;
-  private projectsDir: string;
+  private cachedUsage: TokenUsage | null = null;
+  private lastFetch = 0;
+  private fetching = false;
 
-  constructor() {
-    this.claudeDir = path.join(os.homedir(), '.claude');
-    this.projectsDir = path.join(this.claudeDir, 'projects');
-  }
+  async getUsage(cacheTtlMs: number = 120_000): Promise<TokenUsage> {
+    const now = Date.now();
 
-  async getUsage(): Promise<TokenUsage> {
-    const plan = this.detectPlan();
-    const activity = this.getRecentActivity();
-    const totalMessages = activity.userMessages + activity.assistantMessages;
+    if (this.cachedUsage && now - this.lastFetch < cacheTtlMs) {
+      return this.cachedUsage;
+    }
 
-    // Estimate usage percentage based on known plan limits
-    // Max 5x plan: ~45 Opus messages/5h or ~225 Sonnet messages/5h (approximate)
-    // We use message count as proxy since exact token counts aren't locally available
-    const estimatedLimit = plan.includes('Max') ? 1000 : plan.includes('Pro') ? 500 : 200;
-    const percentUsed = Math.min((totalMessages / estimatedLimit) * 100, 100);
-    const resetDate = this.getResetTime();
+    if (this.fetching && this.cachedUsage) {
+      return this.cachedUsage;
+    }
 
-    return {
-      plan,
-      userMessages: activity.userMessages,
-      assistantMessages: activity.assistantMessages,
-      toolCalls: activity.toolCalls,
-      activeSessions: activity.activeSessions,
-      totalMessages,
-      tokensUsed: totalMessages,
-      tokensLimit: estimatedLimit,
-      tokensRemaining: Math.max(estimatedLimit - totalMessages, 0),
-      percentUsed,
-      resetDate,
-      model: activity.lastModel || 'Claude Opus 4',
-    };
-  }
-
-  private detectPlan(): string {
-    // Try to detect from statsig cache or settings
     try {
-      const statsigDir = path.join(this.claudeDir, 'statsig');
-      const files = fs.readdirSync(statsigDir).filter(f => f.startsWith('statsig.cached.evaluations'));
-      if (files.length > 0) {
-        const content = fs.readFileSync(path.join(statsigDir, files[0]), 'utf-8');
-        // Look for plan indicators in the cached evaluations
-        if (content.includes('"max"') || content.includes('max_plan')) return 'Max (5x)';
-        if (content.includes('"pro"') || content.includes('pro_plan')) return 'Pro';
+      this.fetching = true;
+      logger.add('debug', 'usage', 'Fetching usage via /usage command...');
+      const rawOutput = await this.runUsageCommand();
+
+      // Check for rate limit error in raw output
+      if (rawOutput.includes('rate_limit') || rawOutput.includes('Rate limited')) {
+        logger.add('warn', 'usage', 'Rate limited by Claude API');
+        const rateLimitResult = this.cachedUsage
+          ? { ...this.cachedUsage, rateLimited: true }
+          : { ...this.getDefault(), rateLimited: true };
+        // Don't update lastFetch — retry sooner next time
+        return rateLimitResult;
       }
-    } catch {}
 
-    // Default assumption for Claude Code CLI users
-    return 'Max (5x)';
+      const parsed = this.parseUsageOutput(rawOutput);
+      parsed.lastUpdated = new Date().toLocaleTimeString();
+      this.cachedUsage = parsed;
+      this.lastFetch = now;
+      logger.add('info', 'usage', `Usage: session=${parsed.sessionPercent}%, week=${parsed.weekPercent}%, extra=${parsed.extraSpent || 'n/a'}, reset=${parsed.sessionReset}`);
+      return parsed;
+    } catch (err) {
+      logger.add('warn', 'usage', `Failed to fetch usage: ${err}`);
+      return this.cachedUsage || this.getDefault();
+    } finally {
+      this.fetching = false;
+    }
   }
 
-  private getResetTime(): string {
-    // Anthropic billing windows reset every 5 hours
-    const now = new Date();
-    const hours = now.getUTCHours();
-    // Reset happens at 0, 5, 10, 15, 20 UTC
-    const nextReset = Math.ceil((hours + 1) / 5) * 5;
-    const resetDate = new Date(now);
-    resetDate.setUTCHours(nextReset % 24, 0, 0, 0);
-    if (nextReset <= hours) {
-      resetDate.setUTCDate(resetDate.getUTCDate() + 1);
-    }
+  private runUsageCommand(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!pty) {
+        reject(new Error('node-pty not available'));
+        return;
+      }
 
-    const diff = resetDate.getTime() - now.getTime();
-    const diffH = Math.floor(diff / (1000 * 60 * 60));
-    const diffM = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const shell = '/bin/zsh';
+      const homedir = os.homedir();
+      const existingPath = process.env.PATH || '';
+      const extraPaths = [`${homedir}/.local/bin`, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+      const fullPath = [...new Set([...existingPath.split(':'), ...extraPaths])].join(':');
 
-    return `${diffH}h ${diffM}m`;
+      const proc = pty.spawn(shell, ['-l', '-c', 'exec claude'], {
+        name: 'dumb',
+        cols: 200,
+        rows: 30,
+        cwd: homedir,
+        env: {
+          ...process.env,
+          PATH: fullPath,
+          TERM: 'dumb',
+          NO_COLOR: '1',
+          HOME: homedir,
+          SHELL: shell,
+          LANG: process.env.LANG || 'en_US.UTF-8'
+        }
+      });
+
+      let output = '';
+      let usageSent = false;
+      let usageOutput = '';
+      let collectingUsage = false;
+      let resolvedOrRejected = false;
+      let collectingTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const done = (result: string | null, error?: string) => {
+        if (resolvedOrRejected) return;
+        resolvedOrRejected = true;
+        clearTimeout(timeout);
+        try { proc.kill(); } catch {}
+        if (result) resolve(result);
+        else reject(new Error(error || 'Unknown error'));
+      };
+
+      const timeout = setTimeout(() => {
+        done(usageOutput || null, 'Timeout waiting for /usage');
+      }, 20000);
+
+      proc.onData((data: string) => {
+        output += data;
+
+        if (!usageSent && output.includes('\u276F')) {
+          usageSent = true;
+          setTimeout(() => {
+            proc.write('/usage\r');
+            collectingUsage = true;
+          }, 500);
+        }
+
+        if (collectingUsage) {
+          usageOutput += data;
+
+          // We need at least 3 percentage values to have a complete output
+          const percentCount = (usageOutput.match(/\d+%/g) || []).length;
+          if (percentCount >= 3) {
+            if (collectingTimer) clearTimeout(collectingTimer);
+            collectingTimer = setTimeout(() => done(usageOutput), 1500);
+          }
+        }
+      });
+
+      proc.onExit(() => {
+        done(usageOutput || null, 'Claude exited before /usage completed');
+      });
+    });
   }
 
-  private getRecentActivity(): {
-    userMessages: number;
-    assistantMessages: number;
-    toolCalls: number;
-    activeSessions: number;
-    lastModel: string | null;
-  } {
-    let userMessages = 0;
-    let assistantMessages = 0;
-    let toolCalls = 0;
-    const sessionIds = new Set<string>();
-    let lastModel: string | null = null;
+  private parseUsageOutput(raw: string): TokenUsage {
+    // Step 1: Strip ANSI escape sequences
+    let clean = raw
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+      .replace(/\x1b\][^\x07]*\x07/g, '')
+      .replace(/\x1b[><=\(][^\r\n]*/g, '')
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
 
-    // 5-hour window matching Anthropic's billing reset
-    const now = new Date();
-    const hours = now.getUTCHours();
-    const windowStart = Math.floor(hours / 5) * 5;
-    const windowDate = new Date(now);
-    windowDate.setUTCHours(windowStart, 0, 0, 0);
-    if (windowDate > now) {
-      windowDate.setUTCDate(windowDate.getUTCDate() - 1);
-    }
-    const cutoffTs = windowDate.toISOString();
+    // Step 2: Strip block/bar Unicode characters
+    clean = clean.replace(/[█▌▐▛▜▝▘░▒▓▏▎▍▋▊▉]+/g, ' ');
 
-    if (!fs.existsSync(this.projectsDir)) {
-      return { userMessages, assistantMessages, toolCalls, activeSessions: 0, lastModel };
-    }
+    // Step 3: Split on \r to get individual "lines" from the TUI
+    const segments = clean.split('\r')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
 
-    try {
-      const projects = fs.readdirSync(this.projectsDir);
+    const result = this.getDefault();
+    result.raw = segments.join('\n');
 
-      for (const proj of projects) {
-        const projPath = path.join(this.projectsDir, proj);
-        if (!fs.statSync(projPath).isDirectory()) continue;
+    // Step 4: Walk through segments and extract data by context
+    // The output structure is:
+    //   "Curretsession" or "Current session"
+    //   "68%used"
+    //   "Reses5m (Europe/Paris)" or "Resets in 5m ..."
+    //   "Currentweek(allmodels)" or "Current week (all models)"
+    //   "36%used"
+    //   "Resets2pm(Europe/Paris)" or similar
+    //   "Currentweek(Sonnetonly)" or similar
+    //   "0%used"
+    //   ...
+    //   "Extrausage" or "Extra usage"
+    //   "27%used"
+    //   "$5.40/$20.00spent..."
 
-        let jsonlFiles: string[];
-        try {
-          jsonlFiles = fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl'));
-        } catch { continue; }
+    type Section = 'none' | 'session' | 'week' | 'sonnet' | 'extra';
+    let currentSection: Section = 'none';
 
-        for (const jf of jsonlFiles) {
-          const filePath = path.join(projPath, jf);
-          try {
-            const stat = fs.statSync(filePath);
-            // Skip files not modified in current window
-            if (stat.mtime < windowDate) continue;
+    for (const seg of segments) {
+      const lower = seg.toLowerCase().replace(/\s+/g, '');
 
-            // Read file and count entries in the current window
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const lines = content.split('\n');
+      // Detect section transitions
+      if (lower.includes('currentsession') || lower.includes('curretsession')) {
+        currentSection = 'session';
+        continue;
+      }
+      if ((lower.includes('currentweek') || lower.includes('curentweek')) && lower.includes('allmodel')) {
+        currentSection = 'week';
+        continue;
+      }
+      if ((lower.includes('currentweek') || lower.includes('curentweek')) && lower.includes('sonnet')) {
+        currentSection = 'sonnet';
+        continue;
+      }
+      if (lower.includes('extrausage') || lower.includes('extra usage')) {
+        currentSection = 'extra';
+        continue;
+      }
 
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              try {
-                const entry = JSON.parse(line);
-                const ts = entry.timestamp;
-                if (!ts || ts < cutoffTs) continue;
-
-                const type = entry.type;
-                if (type === 'user') {
-                  userMessages++;
-                  if (entry.sessionId) sessionIds.add(entry.sessionId);
-                } else if (type === 'assistant') {
-                  assistantMessages++;
-                  if (entry.model) {
-                    lastModel = entry.model.includes('opus') ? 'Claude Opus 4'
-                      : entry.model.includes('haiku') ? 'Claude Haiku 4'
-                      : 'Claude Sonnet 4';
-                  }
-                  // Count tool_use blocks
-                  const msg = entry.message;
-                  if (msg?.content && Array.isArray(msg.content)) {
-                    for (const block of msg.content) {
-                      if (block?.type === 'tool_use') toolCalls++;
-                    }
-                  }
-                }
-              } catch {}
-            }
-          } catch {}
+      // Extract percentage
+      const pctMatch = seg.match(/(\d+)%\s*used/i) || seg.match(/(\d+)%/);
+      if (pctMatch) {
+        const pct = parseInt(pctMatch[1], 10);
+        switch (currentSection) {
+          case 'session': result.sessionPercent = pct; break;
+          case 'week': result.weekPercent = pct; break;
+          case 'sonnet': result.weekSonnetPercent = pct; break;
+          case 'extra': result.extraPercent = pct; break;
         }
       }
-    } catch {}
 
+      // Extract reset info
+      // Patterns: "Reses5am", "Resets5am", "Resets 2pm", "Resets Apr 14 at 6pm", "Resets in 5h 23m"
+      const resetMatch = seg.match(/[Rr]es[ets]*\s*(?:in\s*)?(.+?)(?:\(|$)/);
+      if (resetMatch) {
+        let resetVal = resetMatch[1].trim();
+        // Fix garbled "5m" that should be "5am" — if single digit + m and no h before, it's likely Xam
+        resetVal = resetVal.replace(/^(\d{1,2})m$/, '$1am');
+        // Fix garbled "2p" → "2pm"
+        resetVal = resetVal.replace(/^(\d{1,2})p$/, '$1pm');
+        if (resetVal && !resetVal.toLowerCase().startsWith('esc')) {
+          switch (currentSection) {
+            case 'session': result.sessionReset = resetVal; break;
+            case 'week': result.weekReset = resetVal; break;
+            case 'extra': result.extraReset = resetVal; break;
+          }
+        }
+      }
+
+      // Extract money
+      const moneyMatch = seg.match(/\$([\d.]+)\s*\/\s*\$([\d.]+)/);
+      if (moneyMatch) {
+        result.extraSpent = `$${moneyMatch[1]}`;
+        result.extraBudget = `$${moneyMatch[2]}`;
+      }
+    }
+
+    // Set main display values
+    result.percentUsed = result.sessionPercent;
+    result.resetDate = result.sessionReset || '';
+
+    return result;
+  }
+
+  private getDefault(): TokenUsage {
     return {
-      userMessages,
-      assistantMessages,
-      toolCalls,
-      activeSessions: sessionIds.size,
-      lastModel,
+      plan: 'Max (5x)',
+      rateLimited: false,
+      lastUpdated: '',
+      sessionPercent: 0, sessionReset: '',
+      weekPercent: 0, weekReset: '',
+      weekSonnetPercent: 0,
+      extraPercent: 0, extraSpent: '', extraBudget: '', extraReset: '',
+      percentUsed: 0, resetDate: '',
+      model: 'Claude Opus 4', raw: '',
     };
   }
 }

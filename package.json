@@ -1,7 +1,7 @@
 {
   "name": "claude-session-manager",
   "productName": "Claude Session Manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Gestionnaire graphique de sessions Claude Code pour macOS",
   "main": "dist/main/main.js",
   "scripts": {
@@ -12,10 +12,42 @@
     "dev:main": "tsc -p tsconfig.main.json && electron .",
     "dev:renderer": "webpack --config webpack.renderer.config.js --mode development --watch",
     "start": "npm run build && electron .",
-    "dev": "concurrently \"npm run dev:renderer\" \"sleep 3 && npm run dev:main\""
+    "dev": "concurrently \"npm run dev:renderer\" \"sleep 3 && npm run dev:main\"",
+    "dist": "npm run build && electron-builder --mac",
+    "dist:dmg": "npm run build && electron-builder --mac dmg",
+    "dist:zip": "npm run build && electron-builder --mac zip"
   },
   "author": "Leo Marcel",
   "license": "MIT",
+  "build": {
+    "appId": "com.leomarcel.claude-session-manager",
+    "productName": "Claude Session Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] },
+        { "target": "zip", "arch": ["universal"] }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "Claude Session Manager",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.48",
@@ -24,6 +56,7 @@
     "copy-webpack-plugin": "^14.0.0",
     "css-loader": "^6.9.1",
     "electron": "^28.2.0",
+    "electron-builder": "^26.8.1",
     "electron-rebuild": "^3.2.9",
     "style-loader": "^3.3.4",
     "ts-loader": "^9.5.1",

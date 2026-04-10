@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { AppSettings, IDEInfo, QuickAction } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { AppSettings, IDEInfo, QuickAction, LogEntry } from '../types';
 import { t, Locale } from '../i18n';
 
 interface Props {
@@ -10,17 +10,32 @@ interface Props {
   locale: Locale;
 }
 
-type Tab = 'general' | 'ides' | 'actions';
+type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'logs';
 
 export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [ides, setIDEs] = useState<IDEInfo[]>(settings.ides);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logFilter, setLogFilter] = useState<string>('');
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraft(settings);
     setIDEs(settings.ides);
   }, [settings]);
+
+  // Load logs when tab is active, auto-refresh every 2s, auto-scroll
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'logs') return;
+    const loadLogs = () => window.api.logsGet().then(entries => {
+      setLogs(entries);
+      setTimeout(() => logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    }).catch(() => {});
+    loadLogs();
+    const interval = setInterval(loadLogs, 2000);
+    return () => clearInterval(interval);
+  }, [isOpen, activeTab]);
 
   useEffect(() => {
     if (isOpen) {
@@ -30,70 +45,63 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
-    // Rebuild quick actions from IDE toggles
-    const ideActions: QuickAction[] = ides
+  // Save immediately on any change
+  const saveNow = (newDraft: AppSettings, newIDEs?: IDEInfo[]) => {
+    const currentIDEs = newIDEs || ides;
+    const ideActions: QuickAction[] = currentIDEs
       .filter(ide => ide.enabled && ide.installed)
       .map((ide, i) => {
-        const existing = draft.quickActions.find(a => a.id === `ide:${ide.id}`);
-        return {
-          id: `ide:${ide.id}`,
-          type: 'ide' as const,
-          visible: existing?.visible ?? true,
-          order: existing?.order ?? 100 + i,
-        };
+        const existing = newDraft.quickActions.find(a => a.id === `ide:${ide.id}`);
+        return { id: `ide:${ide.id}`, type: 'ide' as const, visible: existing?.visible ?? true, order: existing?.order ?? 100 + i };
       });
-
-    const builtinActions = draft.quickActions.filter(a => a.type === 'builtin');
+    const builtinActions = newDraft.quickActions.filter(a => a.type === 'builtin');
     const allActions = [...builtinActions, ...ideActions].map((a, i) => ({ ...a, order: i }));
 
     onSave({
-      locale: draft.locale,
-      refreshInterval: draft.refreshInterval,
-      sessionsPosition: draft.sessionsPosition,
-      sessionsSortMode: draft.sessionsSortMode,
-      showFilesPanel: draft.showFilesPanel,
-      showActionsPanel: draft.showActionsPanel,
-      ides: ides.map(ide => ({ ...ide })),
+      ...newDraft,
+      ides: currentIDEs.map(ide => ({ ...ide })),
       quickActions: allActions,
     });
-    onClose();
+  };
+
+  const updateDraft = (partial: Partial<AppSettings>) => {
+    const newDraft = { ...draft, ...partial };
+    setDraft(newDraft);
+    saveNow(newDraft);
   };
 
   const handleReset = async () => {
     const defaults = await window.api.settingsReset();
     setDraft(defaults);
     setIDEs(defaults.ides);
+    saveNow(defaults, defaults.ides);
   };
 
   const toggleIDE = (id: string) => {
-    setIDEs(prev => prev.map(ide =>
-      ide.id === id ? { ...ide, enabled: !ide.enabled } : ide
-    ));
+    const newIDEs = ides.map(ide => ide.id === id ? { ...ide, enabled: !ide.enabled } : ide);
+    setIDEs(newIDEs);
+    saveNow(draft, newIDEs);
   };
 
   const toggleAction = (id: string) => {
-    setDraft(prev => ({
-      ...prev,
-      quickActions: prev.quickActions.map(a =>
-        a.id === id ? { ...a, visible: !a.visible } : a
-      ),
-    }));
+    const newDraft = {
+      ...draft,
+      quickActions: draft.quickActions.map(a => a.id === id ? { ...a, visible: !a.visible } : a),
+    };
+    setDraft(newDraft);
+    saveNow(newDraft);
   };
 
   const moveAction = (id: string, direction: -1 | 1) => {
-    setDraft(prev => {
-      const actions = [...prev.quickActions].sort((a, b) => a.order - b.order);
-      const idx = actions.findIndex(a => a.id === id);
-      if (idx < 0) return prev;
-      const newIdx = idx + direction;
-      if (newIdx < 0 || newIdx >= actions.length) return prev;
-      [actions[idx], actions[newIdx]] = [actions[newIdx], actions[idx]];
-      return {
-        ...prev,
-        quickActions: actions.map((a, i) => ({ ...a, order: i })),
-      };
-    });
+    const actions = [...draft.quickActions].sort((a, b) => a.order - b.order);
+    const idx = actions.findIndex(a => a.id === id);
+    if (idx < 0) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= actions.length) return;
+    [actions[idx], actions[newIdx]] = [actions[newIdx], actions[idx]];
+    const newDraft = { ...draft, quickActions: actions.map((a, i) => ({ ...a, order: i })) };
+    setDraft(newDraft);
+    saveNow(newDraft);
   };
 
   const getActionLabel = (action: QuickAction): string => {
@@ -123,15 +131,18 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
         {/* Tabs */}
         <div className="settings-tabs">
-          {(['general', 'ides', 'actions'] as Tab[]).map(tab => (
-            <button
-              key={tab}
-              className={`settings-tab ${activeTab === tab ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {t(locale, `settings.${tab === 'actions' ? 'quickActions' : tab}`)}
-            </button>
-          ))}
+          {(['general', 'terminal', 'ides', 'actions', 'logs'] as Tab[]).map(tab => {
+            const labelKey = tab === 'actions' ? 'quickActions' : tab === 'terminal' ? 'terminal' : tab;
+            return (
+              <button
+                key={tab}
+                className={`settings-tab ${activeTab === tab ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {t(locale, `settings.${labelKey}`)}
+              </button>
+            );
+          })}
         </div>
 
         {/* Content */}
@@ -149,7 +160,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                       name="locale"
                       value="fr"
                       checked={draft.locale === 'fr'}
-                      onChange={() => setDraft(prev => ({ ...prev, locale: 'fr' }))}
+                      onChange={() => updateDraft({ locale: 'fr' })}
                     />
                     <span className="radio-flag">FR</span>
                     {t(locale, 'settings.french')}
@@ -160,10 +171,67 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                       name="locale"
                       value="en"
                       checked={draft.locale === 'en'}
-                      onChange={() => setDraft(prev => ({ ...prev, locale: 'en' }))}
+                      onChange={() => updateDraft({ locale: 'en' })}
                     />
                     <span className="radio-flag">EN</span>
                     {t(locale, 'settings.english')}
+                  </label>
+                </div>
+              </div>
+
+              {/* Theme */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.theme')}</label>
+                <div className="settings-radio-group">
+                  <label className={`settings-radio ${draft.theme === 'dark' ? 'active' : ''}`}>
+                    <input type="radio" name="theme" checked={draft.theme === 'dark'} onChange={() => updateDraft({ theme: 'dark' })} />
+                    {t(locale, 'settings.themeDark')}
+                  </label>
+                  <label className={`settings-radio ${draft.theme === 'light' ? 'active' : ''}`}>
+                    <input type="radio" name="theme" checked={draft.theme === 'light'} onChange={() => updateDraft({ theme: 'light' })} />
+                    {t(locale, 'settings.themeLight')}
+                  </label>
+                </div>
+              </div>
+
+              {/* Notifications */}
+              <div className="settings-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <label className="settings-label">{t(locale, 'settings.notifications')}</label>
+                    <p className="settings-desc">{t(locale, 'settings.notificationsDesc')}</p>
+                  </div>
+                  <label className="toggle-switch">
+                    <input type="checkbox" checked={draft.notificationsEnabled} onChange={() => updateDraft({ notificationsEnabled: !draft.notificationsEnabled })} />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+              </div>
+
+              {/* Tray icon */}
+              <div className="settings-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <label className="settings-label">{t(locale, 'settings.trayIcon')}</label>
+                    <p className="settings-desc">{t(locale, 'settings.trayIconDesc')}</p>
+                  </div>
+                  <label className="toggle-switch">
+                    <input type="checkbox" checked={draft.trayEnabled} onChange={() => updateDraft({ trayEnabled: !draft.trayEnabled })} />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+              </div>
+
+              {/* Demo mode */}
+              <div className="settings-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <label className="settings-label">{t(locale, 'settings.demoMode')}</label>
+                    <p className="settings-desc">{t(locale, 'settings.demoModeDesc')}</p>
+                  </div>
+                  <label className="toggle-switch">
+                    <input type="checkbox" checked={draft.demoMode} onChange={() => updateDraft({ demoMode: !draft.demoMode })} />
+                    <span className="toggle-slider" />
                   </label>
                 </div>
               </div>
@@ -181,14 +249,14 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                       <label className={`settings-radio ${draft.sessionsPosition === 'left' ? 'active' : ''}`} style={{ padding: '5px 12px' }}>
                         <input type="radio" name="sessionsPos" value="left"
                           checked={draft.sessionsPosition === 'left'}
-                          onChange={() => setDraft(prev => ({ ...prev, sessionsPosition: 'left' }))}
+                          onChange={() => updateDraft({ sessionsPosition: 'left' })}
                         />
                         {t(locale, 'settings.sessionsLeft')}
                       </label>
                       <label className={`settings-radio ${draft.sessionsPosition === 'right' ? 'active' : ''}`} style={{ padding: '5px 12px' }}>
                         <input type="radio" name="sessionsPos" value="right"
                           checked={draft.sessionsPosition === 'right'}
-                          onChange={() => setDraft(prev => ({ ...prev, sessionsPosition: 'right' }))}
+                          onChange={() => updateDraft({ sessionsPosition: 'right' })}
                         />
                         {t(locale, 'settings.sessionsRight')}
                       </label>
@@ -203,7 +271,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                         <label key={mode} className={`settings-radio ${draft.sessionsSortMode === mode ? 'active' : ''}`} style={{ padding: '5px 10px' }}>
                           <input type="radio" name="sessionsSort" value={mode}
                             checked={draft.sessionsSortMode === mode}
-                            onChange={() => setDraft(prev => ({ ...prev, sessionsSortMode: mode }))}
+                            onChange={() => updateDraft({ sessionsSortMode: mode })}
                           />
                           {t(locale, `settings.sort${mode.charAt(0).toUpperCase() + mode.slice(1)}`)}
                         </label>
@@ -216,7 +284,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t(locale, 'settings.showFilesPanel')}</span>
                     <label className="toggle-switch small">
                       <input type="checkbox" checked={draft.showFilesPanel}
-                        onChange={() => setDraft(prev => ({ ...prev, showFilesPanel: !prev.showFilesPanel }))}
+                        onChange={() => updateDraft({ showFilesPanel: !draft.showFilesPanel })}
                       />
                       <span className="toggle-slider" />
                     </label>
@@ -225,7 +293,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t(locale, 'settings.showActionsPanel')}</span>
                     <label className="toggle-switch small">
                       <input type="checkbox" checked={draft.showActionsPanel}
-                        onChange={() => setDraft(prev => ({ ...prev, showActionsPanel: !prev.showActionsPanel }))}
+                        onChange={() => updateDraft({ showActionsPanel: !draft.showActionsPanel })}
                       />
                       <span className="toggle-slider" />
                     </label>
@@ -244,10 +312,75 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                     max="60"
                     step="5"
                     value={draft.refreshInterval}
-                    onChange={e => setDraft(prev => ({ ...prev, refreshInterval: parseInt(e.target.value) }))}
+                    onChange={e => updateDraft({ refreshInterval: parseInt(e.target.value) })}
                     className="settings-slider"
                   />
                   <span className="settings-slider-value">{draft.refreshInterval}s</span>
+                </div>
+              </div>
+
+              {/* Usage refresh interval */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.usageRefreshInterval')}</label>
+                <p className="settings-desc">{t(locale, 'settings.usageRefreshDesc')}</p>
+                <div className="settings-slider-row">
+                  <input
+                    type="range"
+                    min="1"
+                    max="30"
+                    step="1"
+                    value={draft.usageRefreshInterval || 2}
+                    onChange={e => updateDraft({ usageRefreshInterval: parseInt(e.target.value) })}
+                    className="settings-slider"
+                  />
+                  <span className="settings-slider-value">{draft.usageRefreshInterval || 2}m</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'terminal' && (
+            <div className="settings-section">
+              {/* Terminal preset */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.terminalPreset')}</label>
+                <div className="settings-radio-group">
+                  {(['default', 'iterm2', 'minimal'] as const).map(preset => (
+                    <label key={preset} className={`settings-radio ${draft.terminalPreset === preset ? 'active' : ''}`}>
+                      <input type="radio" name="preset" checked={draft.terminalPreset === preset} onChange={() => updateDraft({ terminalPreset: preset })} />
+                      {t(locale, `settings.preset${preset.charAt(0).toUpperCase() + preset.slice(1)}`)}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font size */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.terminalFontSize')}</label>
+                <div className="settings-slider-row">
+                  <input type="range" min="10" max="20" step="1" value={draft.terminalFontSize || 13}
+                    onChange={e => updateDraft({ terminalFontSize: parseInt(e.target.value) })} className="settings-slider" />
+                  <span className="settings-slider-value">{draft.terminalFontSize || 13}px</span>
+                </div>
+              </div>
+
+              {/* External terminal */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.externalTerminal')}</label>
+                <p className="settings-desc">{t(locale, 'settings.externalTerminalDesc')}</p>
+                <div className="settings-radio-group" style={{ marginTop: 6 }}>
+                  {([
+                    { id: 'terminal', label: 'Terminal.app' },
+                    { id: 'iterm2', label: 'iTerm2' },
+                    { id: 'warp', label: 'Warp' },
+                    { id: 'alacritty', label: 'Alacritty' },
+                  ] as const).map(term => (
+                    <label key={term.id} className={`settings-radio ${draft.externalTerminal === term.id ? 'active' : ''}`} style={{ padding: '5px 10px' }}>
+                      <input type="radio" name="extterm" checked={draft.externalTerminal === term.id}
+                        onChange={() => updateDraft({ externalTerminal: term.id })} />
+                      {term.label}
+                    </label>
+                  ))}
                 </div>
               </div>
             </div>
@@ -309,6 +442,50 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
               </div>
             </div>
           )}
+
+          {activeTab === 'logs' && (() => {
+            const filtered = logFilter
+              ? logs.filter(l =>
+                  l.message.toLowerCase().includes(logFilter.toLowerCase()) ||
+                  l.source.toLowerCase().includes(logFilter.toLowerCase()) ||
+                  l.level.includes(logFilter.toLowerCase())
+                )
+              : logs;
+
+            return (
+              <div className="logs-panel">
+                <div className="logs-toolbar">
+                  <input
+                    className="logs-filter"
+                    type="text"
+                    placeholder={t(locale, 'settings.logsFilter')}
+                    value={logFilter}
+                    onChange={e => setLogFilter(e.target.value)}
+                  />
+                  <span className="logs-count">{filtered.length} / {logs.length}</span>
+                  <button className="settings-btn secondary" style={{ padding: '4px 10px', fontSize: 11 }}
+                    onClick={() => { window.api.logsClear(); setLogs([]); }}>
+                    {t(locale, 'settings.logsClear')}
+                  </button>
+                </div>
+                <div className="logs-list">
+                  {filtered.length === 0 ? (
+                    <div className="logs-empty">{t(locale, 'settings.logsEmpty')}</div>
+                  ) : (
+                    filtered.map((entry, i) => (
+                      <div key={i} className={`log-entry log-${entry.level}`}>
+                        <span className="log-time">{entry.timestamp.slice(11, 23)}</span>
+                        <span className={`log-level-badge log-badge-${entry.level}`}>{entry.level.toUpperCase()}</span>
+                        <span className="log-source">{entry.source}</span>
+                        <span className="log-message">{entry.message}</span>
+                      </div>
+                    ))
+                  )}
+                  <div ref={logsEndRef} />
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Footer */}
@@ -316,14 +493,9 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
           <button className="settings-btn secondary" onClick={handleReset}>
             {t(locale, 'settings.reset')}
           </button>
-          <div className="settings-footer-right">
-            <button className="settings-btn secondary" onClick={onClose}>
-              {t(locale, 'settings.cancel')}
-            </button>
-            <button className="settings-btn primary" onClick={handleSave}>
-              {t(locale, 'settings.save')}
-            </button>
-          </div>
+          <button className="settings-btn secondary" onClick={onClose}>
+            {t(locale, 'settings.cancel')}
+          </button>
         </div>
       </div>
     </div>

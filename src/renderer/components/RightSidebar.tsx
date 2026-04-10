@@ -8,6 +8,9 @@ interface Props {
   modifiedFiles: ModifiedFile[];
   settings: AppSettings;
   locale: Locale;
+  onRunInShell?: (command: string) => void;
+  onOpenWorktreeModal?: () => void;
+  onOpenDiffTab?: (filePath: string) => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -24,7 +27,7 @@ function getIDEIcon(ideId: string, size = 16): React.ReactNode {
   }
 }
 
-export function RightSidebar({ session, modifiedFiles, settings, locale }: Props) {
+export function RightSidebar({ session, modifiedFiles, settings, locale, onRunInShell, onOpenWorktreeModal, onOpenDiffTab }: Props) {
   const [filePicker, setFilePicker] = useState<{ filePath: string; x: number; y: number } | null>(null);
   const [enabledIDEs, setEnabledIDEs] = useState<IDEInfo[]>([]);
 
@@ -34,13 +37,17 @@ export function RightSidebar({ session, modifiedFiles, settings, locale }: Props
 
   const handleFileClick = (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
-    if (enabledIDEs.length === 1) {
-      // Only one IDE: open directly
-      window.api.actionOpenFileInIDE(session!.projectPath, filePath, enabledIDEs[0].id);
-    } else if (enabledIDEs.length > 1) {
-      // Multiple IDEs: show picker
-      const rect = (e.target as HTMLElement).getBoundingClientRect();
-      setFilePicker({ filePath, x: rect.left, y: rect.bottom + 4 });
+    if (e.shiftKey) {
+      // Shift+click: open in IDE
+      if (enabledIDEs.length === 1) {
+        window.api.actionOpenFileInIDE(session!.projectPath, filePath, enabledIDEs[0].id);
+      } else if (enabledIDEs.length > 1) {
+        const rect = (e.target as HTMLElement).getBoundingClientRect();
+        setFilePicker({ filePath, x: rect.left, y: rect.bottom + 4 });
+      }
+    } else {
+      // Normal click: open diff in a shell tab
+      onOpenDiffTab?.(filePath);
     }
   };
 
@@ -82,17 +89,17 @@ export function RightSidebar({ session, modifiedFiles, settings, locale }: Props
     commit: {
       id: 'commit', name: t(locale, 'actions.commit'), desc: t(locale, 'actions.commitDesc'),
       icon: <GitIcon size={16} />, iconClass: 'git',
-      action: () => window.api.actionCommit(session.projectPath)
+      action: () => onRunInShell?.('git add -p && git commit')
     },
     createPR: {
       id: 'createPR', name: t(locale, 'actions.createPR'), desc: t(locale, 'actions.createPRDesc'),
       icon: <PRIcon size={16} />, iconClass: 'pr',
-      action: () => window.api.actionCreatePR(session.projectPath)
+      action: () => onRunInShell?.('gh pr create')
     },
     worktree: {
       id: 'worktree', name: t(locale, 'actions.worktree'), desc: t(locale, 'actions.worktreeDesc'),
       icon: <WorktreeIcon size={16} />, iconClass: 'worktree',
-      action: () => window.api.actionWorktree(session.projectPath)
+      action: () => onOpenWorktreeModal?.()
     },
     finder: {
       id: 'finder', name: t(locale, 'actions.openFinder'), desc: t(locale, 'actions.openFinderDesc'),
@@ -167,7 +174,7 @@ export function RightSidebar({ session, modifiedFiles, settings, locale }: Props
                 key={`${file.path}-${i}`}
                 className="file-item file-clickable"
                 onClick={(e) => handleFileClick(e, file.path)}
-                title={`${file.path}\n(click to open in IDE)`}
+                title={`${file.path}\nClick: diff | Shift+click: open in IDE`}
               >
                 <span className={`file-status-badge ${file.status}`}>
                   {STATUS_LABELS[file.status] || '?'}
@@ -218,6 +225,7 @@ export function RightSidebar({ session, modifiedFiles, settings, locale }: Props
           ))}
         </div>
       )}
+
     </div>
   );
 }

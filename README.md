@@ -13,6 +13,10 @@
   <em>Detect, resume, and control your AI-powered coding sessions from a single window.</em>
 </p>
 
+<p align="center">
+  <img src="assets/screen.png" alt="Claude Session Manager Screenshot" width="800" />
+</p>
+
 ---
 
 ## Overview
@@ -68,14 +72,24 @@ Claude Session Manager is a graphical desktop application built for developers w
 ### Prerequisites
 
 - **macOS** 12+ (Monterey or later)
-- **Node.js** 18+ and npm
 - **Claude Code CLI** installed and authenticated (`claude` command available)
+
+### Download DMG (recommended)
+
+1. Go to the [Releases](https://github.com/leomarcel/claude-session-manager/releases) page
+2. Download `Claude.Session.Manager-x.x.x-arm64.dmg` (Apple Silicon) or the universal build
+3. Open the DMG and drag **Claude Session Manager** to your Applications folder
+4. Launch from Applications or Spotlight
+
+> **Note:** On first launch, macOS may show a security warning. Go to **System Settings > Privacy & Security** and click **Open Anyway**.
 
 ### From source
 
+Requires **Node.js 18+** and npm.
+
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/claude-session-manager.git
+git clone https://github.com/leomarcel/claude-session-manager.git
 cd claude-session-manager
 
 # Install dependencies
@@ -86,6 +100,16 @@ npx electron-rebuild
 
 # Build and launch
 npm start
+```
+
+### Build your own DMG
+
+```bash
+# Full build → outputs to release/ folder
+npm run dist:dmg
+
+# Or use the build script
+./scripts/build-dmg.sh
 ```
 
 ### Development

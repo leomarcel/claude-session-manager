@@ -248,7 +248,7 @@ export class SessionDetector {
         const index: SessionIndexEntry[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
         if (Array.isArray(index)) {
           const entry = index.find(e => e.sessionId === sessionId)
-            || index.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())[0];
+            || index.reduce((latest, e) => new Date(e.modified) > new Date(latest.modified) ? e : latest);
           if (entry) {
             summary = entry.summary;
             firstPrompt = entry.firstPrompt;

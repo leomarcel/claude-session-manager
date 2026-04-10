@@ -307,6 +307,26 @@ code {
   margin-right: auto;
 }
 
+/* ---- Screenshot ---- */
+.screenshot-section {
+  padding: 0 24px 60px;
+}
+
+.screenshot-wrapper {
+  max-width: 900px;
+  margin: 0 auto;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.screenshot-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 /* ---- Features ---- */
 .features {
   padding: 100px 24px;
@@ -411,6 +431,81 @@ code {
 /* ---- Install ---- */
 .install-section {
   padding: 100px 24px;
+}
+
+/* DMG download box */
+.install-dmg {
+  max-width: 600px;
+  margin: 0 auto 32px;
+}
+
+.install-dmg-inner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 24px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid rgba(217, 119, 87, 0.2);
+}
+
+.install-dmg-inner:hover {
+  border-color: rgba(217, 119, 87, 0.4);
+}
+
+.install-dmg-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: rgba(217, 119, 87, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.install-dmg-info {
+  flex: 1;
+}
+
+.install-dmg-info h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.install-dmg-info p {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.install-dmg-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 10px;
+}
+
+.install-divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 600px;
+  margin: 0 auto 32px;
+}
+
+.install-divider::before,
+.install-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.install-divider span {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .install-steps {

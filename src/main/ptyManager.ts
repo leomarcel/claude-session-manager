@@ -49,11 +49,15 @@ export class PtyManager {
     ];
     const fullPath = [...new Set([...existingPath.split(':'), ...extraPaths])].join(':');
 
-    // Build safe claude command using positional args to avoid injection
+    // resumeSessionId:
+    //   string (uuid) → claude --resume <id>
+    //   'new'          → claude (fresh, no --continue)
+    //   undefined      → claude --continue
     let shellArgs: string[];
-    if (resumeSessionId) {
-      // Use "$1" to safely pass the session ID without shell interpolation
+    if (resumeSessionId && resumeSessionId !== 'new') {
       shellArgs = ['-l', '-c', 'exec claude --resume "$1"', '--', resumeSessionId];
+    } else if (resumeSessionId === 'new') {
+      shellArgs = ['-l', '-c', 'exec claude'];
     } else {
       shellArgs = ['-l', '-c', 'exec claude --continue'];
     }

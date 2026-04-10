@@ -21,14 +21,25 @@ export interface QuickAction {
 
 export type LayoutPosition = 'left' | 'right';
 export type SessionSortMode = 'default' | 'date' | 'project';
+export type TerminalPreset = 'default' | 'iterm2' | 'minimal';
+export type ExternalTerminal = 'terminal' | 'iterm2' | 'warp' | 'alacritty';
+export type AppTheme = 'dark' | 'light';
 
 export interface AppSettings {
   locale: 'fr' | 'en';
   refreshInterval: number;
+  usageRefreshInterval: number; // in minutes
   sessionsPosition: LayoutPosition;
   sessionsSortMode: SessionSortMode;
   showFilesPanel: boolean;
   showActionsPanel: boolean;
+  theme: AppTheme;
+  terminalPreset: TerminalPreset;
+  terminalFontSize: number;
+  externalTerminal: ExternalTerminal;
+  notificationsEnabled: boolean;
+  demoMode: boolean;
+  trayEnabled: boolean;
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -82,12 +93,20 @@ export class SettingsStore {
       }));
 
     return {
-      locale: 'fr',
+      locale: 'en',
       refreshInterval: 15,
+      usageRefreshInterval: 5,
       sessionsPosition: 'left' as LayoutPosition,
-      sessionsSortMode: 'default' as SessionSortMode,
+      sessionsSortMode: 'project' as SessionSortMode,
       showFilesPanel: true,
       showActionsPanel: true,
+      theme: 'dark' as AppTheme,
+      terminalPreset: 'iterm2' as TerminalPreset,
+      terminalFontSize: 13,
+      externalTerminal: 'terminal' as ExternalTerminal,
+      notificationsEnabled: true,
+      demoMode: false,
+      trayEnabled: true,
       ides,
       quickActions: [...DEFAULT_QUICK_ACTIONS, ...ideActions],
     };
@@ -108,12 +127,20 @@ export class SettingsStore {
   private merge(defaults: AppSettings, saved: Partial<AppSettings>): AppSettings {
     const merged = { ...defaults };
 
-    if (saved.locale) merged.locale = saved.locale;
-    if (saved.refreshInterval) merged.refreshInterval = saved.refreshInterval;
-    if (saved.sessionsPosition) merged.sessionsPosition = saved.sessionsPosition;
-    if (saved.sessionsSortMode) merged.sessionsSortMode = saved.sessionsSortMode;
+    if (saved.locale !== undefined) merged.locale = saved.locale;
+    if (saved.refreshInterval !== undefined) merged.refreshInterval = saved.refreshInterval;
+    if (saved.usageRefreshInterval !== undefined) merged.usageRefreshInterval = saved.usageRefreshInterval;
+    if (saved.sessionsPosition !== undefined) merged.sessionsPosition = saved.sessionsPosition;
+    if (saved.sessionsSortMode !== undefined) merged.sessionsSortMode = saved.sessionsSortMode;
     if (saved.showFilesPanel !== undefined) merged.showFilesPanel = saved.showFilesPanel;
     if (saved.showActionsPanel !== undefined) merged.showActionsPanel = saved.showActionsPanel;
+    if (saved.theme !== undefined) merged.theme = saved.theme;
+    if (saved.terminalPreset !== undefined) merged.terminalPreset = saved.terminalPreset;
+    if (saved.terminalFontSize !== undefined) merged.terminalFontSize = saved.terminalFontSize;
+    if (saved.externalTerminal !== undefined) merged.externalTerminal = saved.externalTerminal;
+    if (saved.notificationsEnabled !== undefined) merged.notificationsEnabled = saved.notificationsEnabled;
+    if (saved.demoMode !== undefined) merged.demoMode = saved.demoMode;
+    if (saved.trayEnabled !== undefined) merged.trayEnabled = saved.trayEnabled;
 
     // Merge IDEs: keep saved enabled state, but update installed status
     if (saved.ides) {

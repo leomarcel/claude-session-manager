@@ -15,14 +15,15 @@ contextBridge.exposeInMainWorld('api', {
   getModifiedFiles: (projectPath: string) => ipcRenderer.invoke('get-modified-files', projectPath),
   getGitBranch: (projectPath: string) => ipcRenderer.invoke('get-git-branch', projectPath),
 
-  // Actions
-  actionCommit: (projectPath: string) => ipcRenderer.invoke('action-commit', projectPath),
-  actionCreatePR: (projectPath: string) => ipcRenderer.invoke('action-create-pr', projectPath),
-  actionWorktree: (projectPath: string) => ipcRenderer.invoke('action-worktree', projectPath),
+  // Git data
+  getWorktrees: (projectPath: string) => ipcRenderer.invoke('get-worktrees', projectPath),
+  getFileDiff: (projectPath: string, filePath: string) => ipcRenderer.invoke('get-file-diff', projectPath, filePath),
+  getStagedFiles: (projectPath: string) => ipcRenderer.invoke('get-staged-files', projectPath),
   actionOpenIDE: (projectPath: string, ide: string) => ipcRenderer.invoke('action-open-ide', projectPath, ide),
   actionOpenFileInIDE: (projectPath: string, filePath: string, ideId: string) => ipcRenderer.invoke('action-open-file-in-ide', projectPath, filePath, ideId),
   getEnabledIDEs: () => ipcRenderer.invoke('get-enabled-ides'),
   actionOpenFinder: (projectPath: string) => ipcRenderer.invoke('action-open-finder', projectPath),
+  dialogSelectFolder: () => ipcRenderer.invoke('dialog-select-folder'),
   actionOpenTerminal: (projectPath: string) => ipcRenderer.invoke('action-open-terminal', projectPath),
 
   // PTY
@@ -46,9 +47,28 @@ contextBridge.exposeInMainWorld('api', {
   settingsDetectIDEs: () => ipcRenderer.invoke('settings-detect-ides'),
   settingsReset: () => ipcRenderer.invoke('settings-reset'),
 
+  // App menu
+  onOpenSettings: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('open-settings', handler);
+    return () => { ipcRenderer.removeListener('open-settings', handler); };
+  },
+
+  // Tray
+  updateTraySessions: (sessions: any[], usage?: string) => ipcRenderer.send('update-tray-sessions', sessions, usage),
+  onTraySelectSession: (callback: (projectPath: string) => void) => {
+    const handler = (_event: IpcRendererEvent, projectPath: string) => callback(projectPath);
+    ipcRenderer.on('tray-select-session', handler);
+    return () => { ipcRenderer.removeListener('tray-select-session', handler); };
+  },
+
   // Terminal persistence
   terminalsLoad: () => ipcRenderer.invoke('terminals-load'),
   terminalsSave: (state: any) => ipcRenderer.invoke('terminals-save', state),
+
+  // Logs
+  logsGet: () => ipcRenderer.invoke('logs-get'),
+  logsClear: () => ipcRenderer.invoke('logs-clear'),
 
   // Session meta (rename, archive)
   sessionMetaGetAll: () => ipcRenderer.invoke('session-meta-get-all'),
