@@ -13,7 +13,7 @@
   <meta property="og:description" content="A native macOS desktop app to manage, resume, and monitor all your Claude Code sessions from a single dashboard.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://leomarcel.github.io/claude-session-manager/">
-  <meta property="og:image" content="https://raw.githubusercontent.com/leomarcel/claude-session-manager/main/assets/mascotte_claude.png">
+  <meta property="og:image" content="https://raw.githubusercontent.com/leomarcel/claude-session-manager/main/assets/screen.png">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
@@ -106,8 +106,8 @@
           <div class="feature-icon" style="background: rgba(217, 119, 87, 0.12)">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
           </div>
-          <h3>Auto-Detection</h3>
-          <p>Automatically discovers all running Claude Code sessions by reading local session files. No configuration needed &mdash; just launch and see every active project.</p>
+          <h3>Auto-Detection &amp; Search</h3>
+          <p>Automatically discovers all Claude Code sessions from local files. Search by name, path, or prompt. Filter by project or date. Group sessions under project headers.</p>
         </div>
 
         <div class="feature-card">
@@ -115,7 +115,7 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7c6aef" stroke-width="2" stroke-linecap="round"><polyline points="15,3 21,3 21,9"/><path d="M21 3l-7 7"/><path d="M21 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h6"/></svg>
           </div>
           <h3>Session Resume</h3>
-          <p>Click any session to instantly resume with <code>claude --resume</code>. Your conversation history is preserved.</p>
+          <p>Click any session to instantly resume with <code>claude --resume</code>. Rename, archive, and organize your sessions. Lazy-loaded terminals &mdash; only created when you click.</p>
         </div>
 
         <div class="feature-card">
@@ -123,7 +123,7 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#50e3a0" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
           </div>
           <h3>Multi-Terminal Tabs</h3>
-          <p>Open multiple terminals per project &mdash; Claude sessions and plain shells side by side. Perfect for running <code>npm start</code> alongside Claude.</p>
+          <p>Multiple terminals per project &mdash; Claude + shell tabs side by side. Tabs persist across restarts. Configurable presets (Standard, iTerm2, Minimal).</p>
         </div>
 
         <div class="feature-card">
@@ -131,7 +131,7 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#64b5f6" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           </div>
           <h3>Git Integration</h3>
-          <p>Live <code>git status</code> panel showing modified, staged, and untracked files with color-coded badges.</p>
+          <p>Live <code>git status</code> with diff viewer (click any file), worktree modal, commit &amp; PR in embedded shell tabs. Branch display in the header.</p>
         </div>
 
         <div class="feature-card">
@@ -139,15 +139,15 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffab70" stroke-width="2" stroke-linecap="round"><polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           </div>
           <h3>Quick Actions</h3>
-          <p>One-click commit, create PR, worktree, or open in your favorite IDE. Fully customizable &mdash; reorder, hide, or add new actions.</p>
+          <p>Commit, create PR, worktree, open in IDE, Finder, or terminal. Fully customizable &mdash; reorder, show/hide, choose your external terminal (iTerm2, Warp, Alacritty).</p>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon" style="background: rgba(255, 215, 106, 0.12)">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffd76a" stroke-width="2" stroke-linecap="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
           </div>
-          <h3>Usage Tracking</h3>
-          <p>Real-time credits bar showing messages, tool calls, progress percentage, and reset countdown for your billing window.</p>
+          <h3>Real Usage Tracking</h3>
+          <p>Live data from Claude's <code>/usage</code> command: session %, week %, extra spending, reset countdown. Rate limit detection. Configurable refresh interval.</p>
         </div>
 
         <div class="feature-card">
@@ -155,15 +155,15 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9580ff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           </div>
           <h3>Fully Configurable</h3>
-          <p>Language (FR/EN), layout, IDE detection, actions ordering, session sorting, panel toggles &mdash; everything is customizable from the settings panel.</p>
+          <p>Dark/Light theme, EN/FR, terminal presets, layout, IDE detection, notifications, tray icon, demo mode, session sorting &mdash; all from Settings (Cmd+,).</p>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon" style="background: rgba(255, 107, 122, 0.12)">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff6b7a" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <h3>Secure by Design</h3>
-          <p>Context isolation, no <code>nodeIntegration</code>, <code>execFile</code> only (no shell injection), no telemetry. Everything runs locally.</p>
+          <h3>Native macOS &amp; Secure</h3>
+          <p>Tray icon, native notifications, macOS menus, splash screen. Context isolation, <code>execFile</code> only, no telemetry. Everything runs locally.</p>
         </div>
       </div>
     </div>
@@ -324,13 +324,13 @@
           <h3>Ideas welcome</h3>
           <ul>
             <li>Windows / Linux support</li>
-            <li>Light theme</li>
-            <li>Custom terminal themes</li>
-            <li>Keyboard shortcuts</li>
-            <li>Tray icon with quick switching</li>
-            <li>Session search &amp; filter</li>
+            <li>Keyboard shortcuts (Cmd+1/2/3)</li>
+            <li>Session tags &amp; labels with colors</li>
+            <li>Split view (two terminals side by side)</li>
+            <li>Usage metrics graph per project</li>
+            <li>GitHub integration (PRs, issues)</li>
+            <li>Saved prompt snippets</li>
             <li>Auto-updater</li>
-            <li>More languages</li>
           </ul>
         </div>
         <div class="contribute-card">
