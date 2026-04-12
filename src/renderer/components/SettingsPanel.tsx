@@ -10,7 +10,14 @@ interface Props {
   locale: Locale;
 }
 
-type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'logs';
+type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'updates' | 'logs';
+
+type UpdateCheckState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'available'; version: string }
+  | { kind: 'upToDate' }
+  | { kind: 'error'; message: string };
 
 export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('general');
@@ -19,6 +26,9 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<string>('');
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const [appVersion, setAppVersion] = useState<string>('');
+  const [updateState, setUpdateState] = useState<UpdateCheckState>({ kind: 'idle' });
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
 
   useEffect(() => {
     setDraft(settings);
@@ -40,8 +50,27 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
   useEffect(() => {
     if (isOpen) {
       window.api.settingsDetectIDEs().then(setIDEs);
+      window.api.getAppVersion().then(setAppVersion).catch(() => setAppVersion('?'));
     }
   }, [isOpen]);
+
+  const handleCheckForUpdates = async () => {
+    setUpdateState({ kind: 'checking' });
+    try {
+      const result = await window.api.updaterCheck();
+      setLastChecked(new Date());
+      if (result?.error) {
+        setUpdateState({ kind: 'error', message: result.error });
+      } else if (result?.updateAvailable && result.latestVersion) {
+        setUpdateState({ kind: 'available', version: result.latestVersion });
+      } else {
+        setUpdateState({ kind: 'upToDate' });
+      }
+    } catch (e: any) {
+      setLastChecked(new Date());
+      setUpdateState({ kind: 'error', message: e?.message || 'Unknown error' });
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -131,7 +160,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
         {/* Tabs */}
         <div className="settings-tabs">
-          {(['general', 'terminal', 'ides', 'actions', 'logs'] as Tab[]).map(tab => {
+          {(['general', 'terminal', 'ides', 'actions', 'updates', 'logs'] as Tab[]).map(tab => {
             const labelKey = tab === 'actions' ? 'quickActions' : tab === 'terminal' ? 'terminal' : tab;
             return (
               <button
@@ -364,6 +393,29 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                 </div>
               </div>
 
+              {/* Background color */}
+              <div className="settings-group">
+                <label className="settings-label">Background color</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                  <input type="color" value={draft.terminalBgColor || '#0d0d12'}
+                    onChange={e => updateDraft({ terminalBgColor: e.target.value })}
+                    style={{ width: 32, height: 24, border: 'none', background: 'none', cursor: 'pointer' }}
+                  />
+                  <button className="settings-btn secondary" style={{ padding: '3px 8px', fontSize: 10 }}
+                    onClick={() => updateDraft({ terminalBgColor: '' })}>Reset</button>
+                </div>
+              </div>
+
+              {/* Opacity */}
+              <div className="settings-group">
+                <label className="settings-label">Background opacity</label>
+                <div className="settings-slider-row">
+                  <input type="range" min="50" max="100" step="5" value={draft.terminalBgOpacity || 100}
+                    onChange={e => updateDraft({ terminalBgOpacity: parseInt(e.target.value) })} className="settings-slider" />
+                  <span className="settings-slider-value">{draft.terminalBgOpacity || 100}%</span>
+                </div>
+              </div>
+
               {/* External terminal */}
               <div className="settings-group">
                 <label className="settings-label">{t(locale, 'settings.externalTerminal')}</label>
@@ -422,11 +474,30 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
               </p>
               <div className="settings-actions-list">
                 {[...draft.quickActions].sort((a, b) => a.order - b.order).map(action => (
-                  <div key={action.id} className={`settings-action-item ${!action.visible ? 'hidden-action' : ''}`}>
-                    <div className="action-reorder">
-                      <button onClick={() => moveAction(action.id, -1)} className="reorder-btn">&uarr;</button>
-                      <button onClick={() => moveAction(action.id, 1)} className="reorder-btn">&darr;</button>
-                    </div>
+                  <div
+                    key={action.id}
+                    className={`settings-action-item ${!action.visible ? 'hidden-action' : ''}`}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('action-id', action.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const fromId = e.dataTransfer.getData('action-id');
+                      if (fromId && fromId !== action.id) {
+                        const sorted = [...draft.quickActions].sort((a, b) => a.order - b.order);
+                        const fromIdx = sorted.findIndex(a => a.id === fromId);
+                        const toIdx = sorted.findIndex(a => a.id === action.id);
+                        if (fromIdx >= 0 && toIdx >= 0) {
+                          const [moved] = sorted.splice(fromIdx, 1);
+                          sorted.splice(toIdx, 0, moved);
+                          const newDraft = { ...draft, quickActions: sorted.map((a, i) => ({ ...a, order: i })) };
+                          setDraft(newDraft);
+                          saveNow(newDraft);
+                        }
+                      }
+                    }}
+                  >
+                    <div className="action-reorder drag-handle">&#9776;</div>
                     <span className="action-item-name">{getActionLabel(action)}</span>
                     <span className={`action-type-badge ${action.type}`}>{action.type}</span>
                     <label className="toggle-switch small">
@@ -439,6 +510,79 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                     </label>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'updates' && (
+            <div className="settings-section">
+              {/* Current version */}
+              <div className="settings-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <label className="settings-label">{t(locale, 'settings.currentVersion')}</label>
+                    <p className="settings-desc">{t(locale, 'app.title')}</p>
+                  </div>
+                  <span className="settings-version-pill">v{appVersion || '…'}</span>
+                </div>
+              </div>
+
+              {/* Auto-update toggle */}
+              <div className="settings-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <label className="settings-label">{t(locale, 'settings.autoUpdateEnabled')}</label>
+                    <p className="settings-desc">{t(locale, 'settings.autoUpdateHint')}</p>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={draft.autoUpdate !== false}
+                      onChange={() => updateDraft({ autoUpdate: !draft.autoUpdate })}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+              </div>
+
+              {/* Manual check */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.updateCheckLabel')}</label>
+                <p className="settings-desc">
+                  {lastChecked
+                    ? `${t(locale, 'settings.lastChecked')}: ${lastChecked.toLocaleTimeString()}`
+                    : ' '}
+                </p>
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    className="settings-btn primary"
+                    onClick={handleCheckForUpdates}
+                    disabled={updateState.kind === 'checking'}
+                  >
+                    {updateState.kind === 'checking'
+                      ? t(locale, 'settings.checkingForUpdates')
+                      : t(locale, 'settings.checkForUpdates')}
+                  </button>
+                </div>
+                {updateState.kind === 'upToDate' && (
+                  <div className="settings-update-status success">
+                    {t(locale, 'settings.noUpdateAvailable')}
+                  </div>
+                )}
+                {updateState.kind === 'available' && (
+                  <div className="settings-update-status available">
+                    {t(locale, 'settings.updateAvailable')}: v{updateState.version}
+                    {' · '}
+                    <button className="settings-link" onClick={() => window.api.updaterInstall()}>
+                      {t(locale, 'updater.install')}
+                    </button>
+                  </div>
+                )}
+                {updateState.kind === 'error' && (
+                  <div className="settings-update-status error">
+                    {t(locale, 'settings.updateError')}: {updateState.message}
+                  </div>
+                )}
               </div>
             </div>
           )}

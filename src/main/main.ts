@@ -9,6 +9,7 @@ import { SettingsStore } from './settingsStore';
 import { TerminalStore } from './terminalStore';
 import { SessionMetaStore } from './sessionMetaStore';
 import { logger } from './logger';
+import { autoUpdater } from 'electron-updater';
 
 logger.init();
 
@@ -116,6 +117,41 @@ function setupIPC() {
   // --- Git data ---
   ipcMain.handle('get-worktrees', async (_event, projectPath: string) => GitManager.getWorktrees(projectPath));
   ipcMain.handle('get-staged-files', async (_event, projectPath: string) => GitManager.getStagedFiles(projectPath));
+  // --- Session history ---
+  ipcMain.handle('get-session-history', async (_event, projectPath: string, sessionId: string) => {
+    try {
+      const claudeDir = path.join(require('os').homedir(), '.claude', 'projects');
+      const entries = require('fs').readdirSync(claudeDir);
+      // Find the project dir
+      for (const entry of entries) {
+        const jsonlPath = path.join(claudeDir, entry, `${sessionId}.jsonl`);
+        if (require('fs').existsSync(jsonlPath)) {
+          const content = require('fs').readFileSync(jsonlPath, 'utf-8');
+          const messages: { type: string; text: string; timestamp: string }[] = [];
+          for (const line of content.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const e = JSON.parse(line);
+              if (e.type === 'user' && e.message?.content) {
+                const text = typeof e.message.content === 'string' ? e.message.content : e.message.content.find((b: any) => b.type === 'text')?.text || '';
+                if (text) messages.push({ type: 'user', text: text.slice(0, 200), timestamp: e.timestamp || '' });
+              } else if (e.type === 'assistant' && e.message?.content) {
+                const blocks = Array.isArray(e.message.content) ? e.message.content : [{ type: 'text', text: String(e.message.content) }];
+                const text = blocks.find((b: any) => b.type === 'text')?.text || '';
+                if (text) messages.push({ type: 'assistant', text: text.slice(0, 200), timestamp: e.timestamp || '' });
+              }
+            } catch {}
+          }
+          return messages;
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  ipcMain.handle('get-branches', async (_event, projectPath: string) => GitManager.getBranches(projectPath));
+  ipcMain.handle('git-switch-branch', async (_event, projectPath: string, branch: string) => GitManager.switchBranch(projectPath, branch));
+  ipcMain.handle('git-create-worktree', async (_event, projectPath: string, branch: string, worktreePath: string) => GitManager.createWorktreeForBranch(projectPath, branch, worktreePath));
 
   ipcMain.handle('get-file-diff', async (_event, projectPath: string, filePath: string) => {
     try {
@@ -227,11 +263,28 @@ function setupIPC() {
   ipcMain.handle('pty-destroy', async (_event, id: string) => ptyManager.destroy(id));
 
   // --- Token usage ---
-  ipcMain.handle('get-token-usage', async () => {
-    const s = settingsStore.get();
-    const cacheTtl = (s.usageRefreshInterval || 2) * 60 * 1000;
+  ipcMain.handle('get-token-usage', async (_event, forceRefresh?: boolean) => {
+    const cacheTtl = forceRefresh ? 0 : (settingsStore.get().usageRefreshInterval || 5) * 60 * 1000;
     return tokenTracker.getUsage(cacheTtl);
   });
+
+  // --- Updater ---
+  ipcMain.handle('updater-check', async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      return {
+        currentVersion: app.getVersion(),
+        updateAvailable: !!(result?.updateInfo && result.updateInfo.version !== app.getVersion()),
+        latestVersion: result?.updateInfo?.version,
+      };
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  });
+  ipcMain.handle('updater-install', async () => {
+    autoUpdater.quitAndInstall();
+  });
+  ipcMain.handle('get-app-version', async () => app.getVersion());
 
   // --- Auto-refresh + notifications ---
   let refreshInterval: NodeJS.Timeout | null = null;
@@ -332,6 +385,51 @@ function updateTrayMenu(sessions: { projectName: string; projectPath: string; st
   tray.setContextMenu(Menu.buildFromTemplate(menuItems));
 }
 
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    logger.add('info', 'updater', 'Skipped: app not packaged (dev mode)');
+    return;
+  }
+
+  const autoUpdateEnabled = settingsStore.get().autoUpdate !== false;
+
+  autoUpdater.autoDownload = autoUpdateEnabled;
+  autoUpdater.autoInstallOnAppQuit = autoUpdateEnabled;
+
+  autoUpdater.on('checking-for-update', () => {
+    logger.add('debug', 'updater', 'Checking for update...');
+  });
+  autoUpdater.on('update-available', (info) => {
+    logger.add('info', 'updater', `Update available: v${info.version}`);
+    mainWindow?.webContents.send('update-available', { version: info.version });
+  });
+  autoUpdater.on('update-not-available', () => {
+    logger.add('debug', 'updater', 'No update available');
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    logger.add('debug', 'updater', `Downloading: ${progress.percent.toFixed(1)}%`);
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    logger.add('info', 'updater', `Update downloaded: v${info.version}`);
+    mainWindow?.webContents.send('update-downloaded', { version: info.version });
+  });
+  autoUpdater.on('error', (e) => {
+    logger.add('error', 'updater', e.message);
+  });
+
+  if (!autoUpdateEnabled) {
+    logger.add('info', 'updater', 'Auto-update disabled by user setting');
+    return;
+  }
+
+  autoUpdater.checkForUpdates().catch((e) => {
+    logger.add('warn', 'updater', `Initial check failed: ${e.message}`);
+  });
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 60 * 60 * 1000); // hourly
+}
+
 function createAppMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -369,6 +467,22 @@ function createAppMenu() {
       ]
     },
     {
+      label: 'Sessions',
+      submenu: [
+        { label: 'Session 1', accelerator: 'Cmd+1', click: () => mainWindow?.webContents.send('shortcut', 'session-1') },
+        { label: 'Session 2', accelerator: 'Cmd+2', click: () => mainWindow?.webContents.send('shortcut', 'session-2') },
+        { label: 'Session 3', accelerator: 'Cmd+3', click: () => mainWindow?.webContents.send('shortcut', 'session-3') },
+        { label: 'Session 4', accelerator: 'Cmd+4', click: () => mainWindow?.webContents.send('shortcut', 'session-4') },
+        { label: 'Session 5', accelerator: 'Cmd+5', click: () => mainWindow?.webContents.send('shortcut', 'session-5') },
+        { type: 'separator' },
+        { label: 'New Terminal', accelerator: 'Cmd+T', click: () => mainWindow?.webContents.send('shortcut', 'new-shell') },
+        { label: 'New Claude', accelerator: 'Cmd+Shift+T', click: () => mainWindow?.webContents.send('shortcut', 'new-claude') },
+        { label: 'Close Tab', accelerator: 'Cmd+W', click: () => mainWindow?.webContents.send('shortcut', 'close-tab') },
+        { type: 'separator' },
+        { label: 'Split View', accelerator: 'Cmd+\\', click: () => mainWindow?.webContents.send('shortcut', 'split-view') },
+      ]
+    },
+    {
       label: 'View',
       submenu: [
         { role: 'reload' },
@@ -401,6 +515,7 @@ app.whenReady().then(() => {
   createWindow();
   if (settingsStore.get().trayEnabled) createTray();
   createAppMenu();
+  setupAutoUpdater();
   logger.add('info', 'app', 'Window created, IPC handlers registered');
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,7 +1,7 @@
 {
   "name": "claude-session-manager",
   "productName": "Claude Session Manager",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Gestionnaire graphique de sessions Claude Code pour macOS",
   "main": "dist/main/main.js",
   "scripts": {
@@ -15,7 +15,10 @@
     "dev": "concurrently \"npm run dev:renderer\" \"sleep 3 && npm run dev:main\"",
     "dist": "npm run build && electron-builder --mac",
     "dist:dmg": "npm run build && electron-builder --mac dmg",
-    "dist:zip": "npm run build && electron-builder --mac zip"
+    "dist:zip": "npm run build && electron-builder --mac zip",
+    "dist:unsigned": "./scripts/build-dmg.sh --unsigned --skip-install",
+    "dist:signed": "./scripts/build-dmg.sh --skip-install",
+    "release": "./scripts/build-dmg.sh --publish --skip-install"
   },
   "author": "Leo Marcel",
   "license": "MIT",
@@ -33,23 +36,34 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false,
       "target": [
         {
           "target": "dmg",
           "arch": [
-            "universal"
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "universal"
+            "arm64"
           ]
         }
-      ],
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      ]
     },
+    "afterSign": "scripts/notarize.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "leomarcel",
+        "repo": "claude-session-manager"
+      }
+    ],
     "dmg": {
       "title": "Claude Session Manager",
       "contents": [
@@ -67,6 +81,7 @@
     }
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
@@ -84,6 +99,7 @@
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
+    "electron-updater": "^6.8.3",
     "node-pty": "^1.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

@@ -1,9 +1,20 @@
+export type LiveStatus =
+  | 'disconnected'
+  | 'running'
+  | 'tool_executing'
+  | 'waiting_input'
+  | 'idle'
+  | 'completed'
+  | 'crashed';
+
 export interface ClaudeSession {
   pid: number;
   projectPath: string;
   projectName: string;
   model: string;
   status: 'active' | 'idle' | 'busy';
+  liveStatus?: LiveStatus;
+  liveDetail?: string;
   startTime: string;
   command: string;
   conversationId?: string;
@@ -13,6 +24,8 @@ export interface ClaudeSession {
   gitBranch?: string;
   customName?: string;
   archived?: boolean;
+  isWorktree?: boolean;
+  worktreeBranch?: string;
 }
 
 export interface SessionMeta {
@@ -87,9 +100,12 @@ export interface AppSettings {
   terminalPreset: TerminalPreset;
   terminalFontSize: number;
   externalTerminal: ExternalTerminal;
+  terminalBgColor: string;
+  terminalBgOpacity: number;
   notificationsEnabled: boolean;
   demoMode: boolean;
   trayEnabled: boolean;
+  autoUpdate: boolean;
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -99,9 +115,11 @@ export interface AppSettings {
 export interface TerminalTab {
   id: string;
   projectPath: string;
+  sessionKey: string;         // Unique key per session (conversationId or generated)
   label: string;
-  type: 'claude' | 'shell';
-  initialized?: boolean;     // false = restored but not yet activated
+  type: 'claude' | 'shell' | 'diff' | 'history' | 'notes';
+  initialized?: boolean;
+  diffFilePath?: string;     // For diff tabs: the file to diff
   command: string;           // Startup command (for restore)
   resumeSessionId?: string;
   ptyId?: string;            // Runtime only — not persisted
@@ -131,6 +149,10 @@ export interface ElectronAPI {
   getWorktrees: (projectPath: string) => Promise<WorktreeInfo[]>;
   getFileDiff: (projectPath: string, filePath: string) => Promise<string>;
   getStagedFiles: (projectPath: string) => Promise<string[]>;
+  getSessionHistory: (projectPath: string, sessionId: string) => Promise<{ type: string; text: string; timestamp: string }[]>;
+  getBranches: (projectPath: string) => Promise<{ name: string; current: boolean }[]>;
+  gitSwitchBranch: (projectPath: string, branch: string) => Promise<{ success: boolean; error?: string }>;
+  gitCreateWorktree: (projectPath: string, branch: string, worktreePath: string) => Promise<{ success: boolean; error?: string }>;
   actionOpenIDE: (projectPath: string, ide: string) => Promise<void>;
   actionOpenFileInIDE: (projectPath: string, filePath: string, ideId: string) => Promise<void>;
   getEnabledIDEs: () => Promise<IDEInfo[]>;
@@ -143,11 +165,17 @@ export interface ElectronAPI {
   ptyResize: (id: string, cols: number, rows: number) => Promise<void>;
   ptyDestroy: (id: string) => Promise<void>;
   onPtyData: (callback: (id: string, data: string) => void) => () => void;
-  getTokenUsage: () => Promise<TokenUsage>;
+  getTokenUsage: (forceRefresh?: boolean) => Promise<TokenUsage>;
   settingsGet: () => Promise<AppSettings>;
   settingsSave: (settings: Partial<AppSettings>) => Promise<AppSettings>;
   settingsDetectIDEs: () => Promise<IDEInfo[]>;
   settingsReset: () => Promise<AppSettings>;
+  onUpdateAvailable: (callback: (info: { version: string }) => void) => () => void;
+  onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+  updaterInstall: () => Promise<void>;
+  updaterCheck: () => Promise<{ currentVersion?: string; updateAvailable?: boolean; latestVersion?: string; error?: string }>;
+  getAppVersion: () => Promise<string>;
+  onShortcut: (callback: (action: string) => void) => () => void;
   onOpenSettings: (callback: () => void) => () => void;
   updateTraySessions: (sessions: { projectName: string; projectPath: string; status: string }[], usage?: string) => void;
   onTraySelectSession: (callback: (projectPath: string) => void) => () => void;

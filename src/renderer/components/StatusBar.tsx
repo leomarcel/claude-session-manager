@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ClaudeSession, TokenUsage } from '../types';
 import { Locale, t } from '../i18n';
 import { ClaudeIcon } from './Icons';
@@ -38,8 +38,15 @@ export function StatusBar({
   session, tokenUsage, sessionCount, locale,
   showLeftPanel, showRightPanel, onToggleLeftPanel, onToggleRightPanel, onRefreshUsage
 }: Props) {
+  const [refreshing, setRefreshing] = useState(false);
   const getBarClass = (percent: number) => percent < 50 ? 'low' : percent < 80 ? 'medium' : 'high';
   const getColor = (percent: number) => percent < 50 ? 'var(--green)' : percent < 80 ? 'var(--yellow)' : 'var(--red)';
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await onRefreshUsage();
+    setRefreshing(false);
+  };
 
   return (
     <div className="statusbar">
@@ -147,7 +154,7 @@ export function StatusBar({
             )}
 
             {/* Refresh + last updated */}
-            <button className="credits-refresh" onClick={onRefreshUsage} title={t(locale, 'sidebar.refresh')}>
+            <button className={`credits-refresh ${refreshing ? 'spinning' : ''}`} onClick={handleRefresh} disabled={refreshing} title={t(locale, 'sidebar.refresh')}>
               &#x21bb;
             </button>
             {tokenUsage.lastUpdated && (

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ClaudeSession, SessionSortMode } from '../types';
+import { ClaudeSession, SessionSortMode, LiveStatus } from '../types';
 import { Locale, t } from '../i18n';
 import { ClaudeIcon, SessionIcon } from './Icons';
 
@@ -8,14 +8,38 @@ interface Props {
   archivedSessions: ClaudeSession[];
   selectedSession: ClaudeSession | null;
   onSelectSession: (session: ClaudeSession) => void;
-  onRefresh: () => void;
-  onRename: (projectPath: string, name: string) => void;
-  onArchive: (projectPath: string) => void;
-  onUnarchive: (projectPath: string) => void;
+  onRefresh: () => void | Promise<void>;
+  onRename: (key: string, name: string) => void;
+  onArchive: (key: string) => void;
+  onUnarchive: (key: string) => void;
   onNewSession: () => void;
+  onCreateSessionInProject: (projectPath: string) => void;
   sortMode: SessionSortMode;
   locale: Locale;
 }
+
+const LIVE_STATUSES: LiveStatus[] = [
+  'running',
+  'tool_executing',
+  'waiting_input',
+  'idle',
+  'completed',
+  'crashed',
+  'disconnected',
+];
+
+const liveStatusLabelKey = (st: LiveStatus): string => {
+  const map: Record<LiveStatus, string> = {
+    disconnected: 'sidebar.liveDisconnected',
+    running: 'sidebar.liveRunning',
+    tool_executing: 'sidebar.liveToolExecuting',
+    waiting_input: 'sidebar.liveWaitingInput',
+    idle: 'sidebar.liveIdle',
+    completed: 'sidebar.liveCompleted',
+    crashed: 'sidebar.liveCrashed',
+  };
+  return map[st];
+};
 
 function getSessionDisplayName(session: ClaudeSession): string {
   if (session.customName) return session.customName;
@@ -30,7 +54,7 @@ function getSessionDisplayName(session: ClaudeSession): string {
 
 export function SessionSidebar({
   sessions, archivedSessions, selectedSession,
-  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onNewSession, sortMode, locale
+  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onNewSession, onCreateSessionInProject, sortMode, locale
 }: Props) {
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -40,6 +64,21 @@ export function SessionSidebar({
   const [filterProjects, setFilterProjects] = useState<Set<string>>(new Set());
   const [filterDate, setFilterDate] = useState<'all' | 'today' | 'week'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatuses, setFilterStatuses] = useState<Set<LiveStatus>>(new Set());
+  const [groupByStatus, setGroupByStatus] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    const start = Date.now();
+    try { await onRefresh(); } finally {
+      const elapsed = Date.now() - start;
+      const minDuration = 600;
+      if (elapsed < minDuration) await new Promise(r => setTimeout(r, minDuration - elapsed));
+      setRefreshing(false);
+    }
+  };
 
   const statusLabel = (status: string) => {
     switch (status) {
@@ -49,8 +88,10 @@ export function SessionSidebar({
     }
   };
 
+  const sessionKey = (s: ClaudeSession) => s.conversationId || `${s.projectPath}:${s.startTime}`;
+
   const startRename = (session: ClaudeSession) => {
-    setEditingPath(session.projectPath);
+    setEditingPath(sessionKey(session));
     setEditValue(session.customName || session.firstPrompt || session.projectName);
     setContextMenu(null);
   };
@@ -71,12 +112,12 @@ export function SessionSidebar({
 
   const renderSession = (session: ClaudeSession, isArchived = false, hideProjectPath = false) => {
     const displayName = getSessionDisplayName(session);
-    const isEditing = editingPath === session.projectPath;
+    const isEditing = editingPath === sessionKey(session);
 
     return (
       <div
         key={`${session.pid}-${session.projectPath}-${session.conversationId || ''}`}
-        className={`session-item ${selectedSession?.projectPath === session.projectPath ? 'active' : ''} ${isArchived ? 'archived' : ''}`}
+        className={`session-item ${selectedSession?.projectPath === session.projectPath && selectedSession?.conversationId === session.conversationId ? 'active' : ''} ${isArchived ? 'archived' : ''}`}
         onClick={() => onSelectSession(session)}
         onContextMenu={(e) => handleContextMenu(e, session)}
       >
@@ -105,7 +146,13 @@ export function SessionSidebar({
               {displayName}
             </span>
           )}
+          {session.isWorktree && <span className="worktree-badge">worktree</span>}
         </div>
+        {session.isWorktree && session.worktreeBranch && (
+          <div className="session-worktree-info">
+            {session.worktreeBranch} &middot; {session.projectPath.split('/').pop()}
+          </div>
+        )}
         {!hideProjectPath && (
           <div className="session-path" title={session.projectPath}>
             {session.projectPath}
@@ -122,19 +169,17 @@ export function SessionSidebar({
           </div>
         )}
         <div className="session-meta">
-          <div className="session-status">
-            <SessionIcon status={session.status} size={12} />
-            <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-              {statusLabel(session.status)}
-            </span>
-          </div>
+          <span className={`live-badge live-${session.liveStatus || 'disconnected'}`}>
+            <span className={`live-dot live-${session.liveStatus || 'disconnected'}`} />
+            {t(locale, liveStatusLabelKey(session.liveStatus || 'disconnected'))}
+          </span>
           <span className="session-model">{session.model}</span>
-          {session.messageCount && session.messageCount > 0 && (
-            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-              {session.messageCount} {t(locale, 'sidebar.msgs')}
-            </span>
-          )}
         </div>
+        {session.liveDetail && (
+          <div className="session-live-detail" title={session.liveDetail}>
+            {session.liveDetail}
+          </div>
+        )}
       </div>
     );
   };
@@ -150,6 +195,8 @@ export function SessionSidebar({
       ].join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
+    // Status filter
+    if (filterStatuses.size > 0 && !filterStatuses.has(s.liveStatus || 'disconnected')) return false;
     // Project filter
     if (filterProjects.size > 0 && !filterProjects.has(s.projectPath)) return false;
     // Date filter
@@ -188,9 +235,27 @@ export function SessionSidebar({
           </span>
           <span className="project-group-name">{group.dirName}</span>
           <span className="project-group-count">{group.sessions.length}</span>
+          <button className="project-group-add" onClick={(e) => { e.stopPropagation(); onCreateSessionInProject(group.path); }} title="New session">+</button>
         </div>
         <div className="project-group-sessions">
-          {group.sessions.map(s => renderSession(s, false, true))}
+          {groupByStatus ? (() => {
+            const byStatus = new Map<LiveStatus, ClaudeSession[]>();
+            for (const s of group.sessions) {
+              const st = s.liveStatus || 'disconnected';
+              if (!byStatus.has(st)) byStatus.set(st, []);
+              byStatus.get(st)!.push(s);
+            }
+            return LIVE_STATUSES.filter(st => byStatus.has(st)).map(st => (
+              <div key={st} className="status-subgroup">
+                <div className="status-subgroup-header">
+                  <span className={`live-dot live-${st}`} />
+                  <span>{t(locale, liveStatusLabelKey(st))}</span>
+                  <span className="status-subgroup-count">{byStatus.get(st)!.length}</span>
+                </div>
+                {byStatus.get(st)!.map(s => renderSession(s, false, true))}
+              </div>
+            ));
+          })() : group.sessions.map(s => renderSession(s, false, true))}
         </div>
       </div>
     ));
@@ -205,7 +270,9 @@ export function SessionSidebar({
             <button className={`refresh-btn ${showFilters ? 'active-filter' : ''}`} onClick={() => setShowFilters(p => !p)} title={t(locale, 'sidebar.filters')}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/></svg>
             </button>
-            <button className="refresh-btn" onClick={onRefresh} title={t(locale, 'sidebar.refresh')}>&#x21bb;</button>
+            <button className="refresh-btn" onClick={handleRefresh} title={t(locale, 'sidebar.refresh')}>
+              <span className={`refresh-icon ${refreshing ? 'spinning' : ''}`}>&#x21bb;</span>
+            </button>
           </div>
         </div>
       </div>
@@ -228,42 +295,100 @@ export function SessionSidebar({
       {/* Filter panel */}
       {showFilters && (
         <div className="filter-panel">
-          {/* Date filter */}
+          {/* Date filter (date sort only) */}
           {sortMode === 'date' && (
+            <div className="filter-section">
+              <div className="filter-label">{t(locale, 'sidebar.filterDate')}</div>
+              <div className="filter-row">
+                {(['all', 'today', 'week'] as const).map(f => (
+                  <button key={f} className={`filter-chip ${filterDate === f ? 'active' : ''}`} onClick={() => setFilterDate(f)}>
+                    {t(locale, `sidebar.filter${f.charAt(0).toUpperCase() + f.slice(1)}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Status filter — always on top */}
+          <div className="filter-section">
+            <div className="filter-label">{t(locale, 'sidebar.filterStatus')}</div>
             <div className="filter-row">
-              {(['all', 'today', 'week'] as const).map(f => (
-                <button key={f} className={`filter-chip ${filterDate === f ? 'active' : ''}`} onClick={() => setFilterDate(f)}>
-                  {t(locale, `sidebar.filter${f.charAt(0).toUpperCase() + f.slice(1)}`)}
+              {LIVE_STATUSES.map(st => (
+                <button key={st}
+                  className={`filter-chip ${filterStatuses.has(st) ? 'active' : ''}`}
+                  onClick={() => setFilterStatuses(prev => {
+                    const next = new Set(prev);
+                    if (next.has(st)) next.delete(st); else next.add(st);
+                    return next;
+                  })}
+                >
+                  <span className={`live-dot live-${st}`} />
+                  {t(locale, liveStatusLabelKey(st))}
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Group by status switch (project mode only) */}
+          {sortMode === 'project' && (
+            <div className="filter-section">
+              <button
+                type="button"
+                className="filter-switch"
+                onClick={() => setGroupByStatus(p => !p)}
+                aria-pressed={groupByStatus}
+              >
+                <span className="filter-switch-label">{t(locale, 'sidebar.groupByStatus')}</span>
+                <span className={`filter-switch-track ${groupByStatus ? 'on' : ''}`}>
+                  <span className="filter-switch-thumb" />
+                </span>
+              </button>
+            </div>
           )}
-          {/* Project filter */}
+
+          {/* Project list (project mode only) */}
           {sortMode === 'project' && (() => {
             const allProjects = [...new Set(sessions.map(s => s.projectPath))];
             return (
-              <div className="filter-project-list">
-                <div className="filter-row">
-                  <button className={`filter-chip ${filterProjects.size === 0 ? 'active' : ''}`} onClick={() => setFilterProjects(new Set())}>
-                    {t(locale, 'sidebar.filterAll')}
-                  </button>
+              <div className="filter-section">
+                <div className="filter-label">
+                  <span>{t(locale, 'sidebar.filterProjects')}</span>
+                  {filterProjects.size > 0 && (
+                    <button className="filter-label-clear" onClick={() => setFilterProjects(new Set())}>
+                      {t(locale, 'sidebar.filterAll')}
+                    </button>
+                  )}
                 </div>
-                {allProjects.map(p => {
-                  const name = p.split('/').pop() || p;
-                  const isActive = filterProjects.has(p);
-                  return (
-                    <label key={p} className="filter-project-item">
-                      <input type="checkbox" checked={isActive} onChange={() => {
-                        setFilterProjects(prev => {
-                          const next = new Set(prev);
-                          if (next.has(p)) next.delete(p); else next.add(p);
-                          return next;
-                        });
-                      }} />
-                      <span>{name}</span>
-                    </label>
-                  );
-                })}
+                <div className="filter-project-list">
+                  {allProjects.map(p => {
+                    const name = p.split('/').pop() || p;
+                    const isActive = filterProjects.has(p);
+                    const count = sessions.filter(s => s.projectPath === p).length;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`filter-project-row ${isActive ? 'active' : ''}`}
+                        onClick={() => {
+                          setFilterProjects(prev => {
+                            const next = new Set(prev);
+                            if (next.has(p)) next.delete(p); else next.add(p);
+                            return next;
+                          });
+                        }}
+                        title={p}
+                      >
+                        <span className="filter-project-check" aria-hidden="true">
+                          {isActive && (
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                          )}
+                        </span>
+                        <span className="filter-project-name">{name}</span>
+                        <span className="filter-project-count">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             );
           })()}
@@ -323,12 +448,13 @@ export function SessionSidebar({
           <button className="context-menu-item" onClick={() => startRename(contextMenu.session)}>
             &#9998; {t(locale, 'sidebar.rename')}
           </button>
+          <div className="context-menu-divider" />
           {contextMenu.session.archived ? (
-            <button className="context-menu-item" onClick={() => { onUnarchive(contextMenu.session.projectPath); closeContextMenu(); }}>
+            <button className="context-menu-item" onClick={() => { onUnarchive(sessionKey(contextMenu.session)); closeContextMenu(); }}>
               &#9776; {t(locale, 'sidebar.unarchive')}
             </button>
           ) : (
-            <button className="context-menu-item archive" onClick={() => { onArchive(contextMenu.session.projectPath); closeContextMenu(); }}>
+            <button className="context-menu-item archive" onClick={() => { onArchive(sessionKey(contextMenu.session)); closeContextMenu(); }}>
               &#9776; {t(locale, 'sidebar.archive')}
             </button>
           )}

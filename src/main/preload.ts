@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('api', {
   getWorktrees: (projectPath: string) => ipcRenderer.invoke('get-worktrees', projectPath),
   getFileDiff: (projectPath: string, filePath: string) => ipcRenderer.invoke('get-file-diff', projectPath, filePath),
   getStagedFiles: (projectPath: string) => ipcRenderer.invoke('get-staged-files', projectPath),
+  getSessionHistory: (projectPath: string, sessionId: string) => ipcRenderer.invoke('get-session-history', projectPath, sessionId),
+  getBranches: (projectPath: string) => ipcRenderer.invoke('get-branches', projectPath),
+  gitSwitchBranch: (projectPath: string, branch: string) => ipcRenderer.invoke('git-switch-branch', projectPath, branch),
+  gitCreateWorktree: (projectPath: string, branch: string, worktreePath: string) => ipcRenderer.invoke('git-create-worktree', projectPath, branch, worktreePath),
   actionOpenIDE: (projectPath: string, ide: string) => ipcRenderer.invoke('action-open-ide', projectPath, ide),
   actionOpenFileInIDE: (projectPath: string, filePath: string, ideId: string) => ipcRenderer.invoke('action-open-file-in-ide', projectPath, filePath, ideId),
   getEnabledIDEs: () => ipcRenderer.invoke('get-enabled-ides'),
@@ -39,13 +43,35 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // Token usage
-  getTokenUsage: () => ipcRenderer.invoke('get-token-usage'),
+  getTokenUsage: (forceRefresh?: boolean) => ipcRenderer.invoke('get-token-usage', forceRefresh),
 
   // Settings
   settingsGet: () => ipcRenderer.invoke('settings-get'),
   settingsSave: (settings: any) => ipcRenderer.invoke('settings-save', settings),
   settingsDetectIDEs: () => ipcRenderer.invoke('settings-detect-ides'),
   settingsReset: () => ipcRenderer.invoke('settings-reset'),
+
+  // Updater
+  onUpdateAvailable: (callback: (info: { version: string }) => void) => {
+    const handler = (_event: IpcRendererEvent, info: any) => callback(info);
+    ipcRenderer.on('update-available', handler);
+    return () => { ipcRenderer.removeListener('update-available', handler); };
+  },
+  onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
+    const handler = (_event: IpcRendererEvent, info: any) => callback(info);
+    ipcRenderer.on('update-downloaded', handler);
+    return () => { ipcRenderer.removeListener('update-downloaded', handler); };
+  },
+  updaterInstall: () => ipcRenderer.invoke('updater-install'),
+  updaterCheck: () => ipcRenderer.invoke('updater-check'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  // Shortcuts
+  onShortcut: (callback: (action: string) => void) => {
+    const handler = (_event: IpcRendererEvent, action: string) => callback(action);
+    ipcRenderer.on('shortcut', handler);
+    return () => { ipcRenderer.removeListener('shortcut', handler); };
+  },
 
   // App menu
   onOpenSettings: (callback: () => void) => {

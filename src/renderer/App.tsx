@@ -7,6 +7,8 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { RightSidebar } from './components/RightSidebar';
 import { StatusBar } from './components/StatusBar';
 import { WorktreeModal } from './components/WorktreeModal';
+import { BranchModal } from './components/BranchModal';
+import { UpdateToast } from './components/UpdateToast';
 import { SettingsPanel } from './components/SettingsPanel';
 import { NewSessionModal } from './components/NewSessionModal';
 
@@ -15,12 +17,18 @@ const DEFAULT_SETTINGS: AppSettings = {
   sessionsPosition: 'left', sessionsSortMode: 'project',
   showFilesPanel: true, showActionsPanel: true,
   theme: 'dark', terminalPreset: 'iterm2', terminalFontSize: 13, externalTerminal: 'terminal',
-  notificationsEnabled: true, demoMode: false, trayEnabled: true,
+  notificationsEnabled: true, demoMode: false, trayEnabled: true, autoUpdate: true,
+  terminalBgColor: '', terminalBgOpacity: 100,
   ides: [], quickActions: [],
 };
 
 let tabCounter = 0;
 function nextTabId() { return `tab-${++tabCounter}-${Date.now()}`; }
+
+/** Unique key for a session — uses conversationId if available, else a generated fallback */
+function getSessionKey(session: ClaudeSession): string {
+  return session.conversationId || `${session.projectPath}:${session.startTime}`;
+}
 
 function hideSplash() {
   const el = document.getElementById('splash');
@@ -37,13 +45,17 @@ export function App() {
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [splitView, setSplitView] = useState(false);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [sessionMeta, setSessionMeta] = useState<Record<string, SessionMeta>>({});
 
   const locale: Locale = settings.locale || 'en';
+  const isDemo = settings.demoMode;
 
   // --- Persistence: save tabs whenever they change ---
   useEffect(() => {
@@ -77,6 +89,12 @@ export function App() {
     });
   }, []);
 
+  // Listen for auto-updater events
+  useEffect(() => {
+    const cleanup = window.api.onUpdateDownloaded((info) => setUpdateReady(info));
+    return cleanup;
+  }, []);
+
   // --- Sessions ---
   const loadSessions = useCallback(async () => {
     try { setSessions(await window.api.getSessions()); } catch {}
@@ -100,15 +118,30 @@ export function App() {
       if (session) handleSelectSession(session);
     });
 
-    // Listen for Cmd+, (settings from macOS menu)
-    const settingsCleanup = window.api.onOpenSettings(() => {
-      setSettingsOpen(true);
+    const settingsCleanup = window.api.onOpenSettings(() => setSettingsOpen(true));
+
+    // Keyboard shortcuts
+    const shortcutCleanup = window.api.onShortcut((action) => {
+      if (action.startsWith('session-')) {
+        const idx = parseInt(action.split('-')[1], 10) - 1;
+        const activeSess = sessions.filter(s => !(sessionMeta[s.projectPath]?.archived));
+        if (activeSess[idx]) handleSelectSession(activeSess[idx]);
+      } else if (action === 'new-shell') {
+        handleAddShellTab();
+      } else if (action === 'new-claude') {
+        handleAddClaudeTab();
+      } else if (action === 'close-tab') {
+        if (activeTabId) handleCloseTab(activeTabId);
+      } else if (action === 'split-view') {
+        setSplitView(prev => !prev);
+      }
     });
 
     return () => {
       cleanup();
       trayCleanup();
       settingsCleanup();
+      shortcutCleanup();
       window.api.stopSessionRefresh();
       clearInterval(tokenInterval);
     };
@@ -119,11 +152,14 @@ export function App() {
     const usageStr = tokenUsage
       ? `Session ${tokenUsage.sessionPercent}% · Week ${tokenUsage.weekPercent}%${tokenUsage.extraSpent ? ` · ${tokenUsage.extraSpent}/${tokenUsage.extraBudget}` : ''}`
       : '';
-    window.api.updateTraySessions(
-      sessions.map(s => ({ projectName: s.projectName, projectPath: s.projectPath, status: s.status })),
-      usageStr
-    );
-  }, [sessions, tokenUsage]);
+    // Don't send demo data to tray
+    if (!isDemo) {
+      window.api.updateTraySessions(
+        sessions.map(s => ({ projectName: s.projectName, projectPath: s.projectPath, status: s.status })),
+        usageStr
+      );
+    }
+  }, [sessions, tokenUsage, isDemo]);
 
   // --- Git info for selected session ---
   useEffect(() => {
@@ -143,28 +179,28 @@ export function App() {
     return () => clearInterval(interval);
   }, [selectedSession]);
 
-  // --- Select session: create initial Claude tab if none for this project ---
+  // --- Select session: create initial Claude tab if none for this session ---
   const handleSelectSession = (session: ClaudeSession) => {
     setSelectedSession(session);
 
-    // In demo mode, don't create real PTY tabs
     if (isDemo) return;
 
-    // Check if we already have tabs for this project
-    const projectTabs = tabs.filter(tab => tab.projectPath === session.projectPath);
-    if (projectTabs.length > 0) {
-      const hasUninit = projectTabs.some(t => !t.initialized);
+    const sKey = getSessionKey(session);
+    const sessionTabs = tabs.filter(tab => tab.sessionKey === sKey);
+    if (sessionTabs.length > 0) {
+      const hasUninit = sessionTabs.some(t => !t.initialized);
       if (hasUninit) {
         setTabs(prev => prev.map(t =>
-          t.projectPath === session.projectPath ? { ...t, initialized: true } : t
+          t.sessionKey === sKey ? { ...t, initialized: true } : t
         ));
       }
-      const previouslyActive = projectTabs.find(t => t.id === activeTabId);
-      setActiveTabId(previouslyActive?.id ?? projectTabs[0].id);
+      const previouslyActive = sessionTabs.find(t => t.id === activeTabId);
+      setActiveTabId(previouslyActive?.id ?? sessionTabs[0].id);
     } else {
       const newTab: TerminalTab = {
         id: nextTabId(),
         projectPath: session.projectPath,
+        sessionKey: sKey,
         label: 'Claude',
         type: 'claude',
         command: '',
@@ -179,10 +215,12 @@ export function App() {
   // --- Tab management ---
   const handleAddClaudeTab = () => {
     if (!selectedSession) return;
+    const sKey = getSessionKey(selectedSession);
     const newTab: TerminalTab = {
       id: nextTabId(),
       projectPath: selectedSession.projectPath,
-      label: `Claude ${tabs.filter(t => t.type === 'claude' && t.projectPath === selectedSession.projectPath).length + 1}`,
+      sessionKey: sKey,
+      label: `Claude ${tabs.filter(t => t.type === 'claude' && t.sessionKey === sKey).length + 1}`,
       type: 'claude',
       command: '',
       resumeSessionId: selectedSession.conversationId,
@@ -194,10 +232,12 @@ export function App() {
 
   const handleAddShellTab = () => {
     if (!selectedSession) return;
-    const shellCount = tabs.filter(t => t.type === 'shell' && t.projectPath === selectedSession.projectPath).length;
+    const sKey = getSessionKey(selectedSession);
+    const shellCount = tabs.filter(t => t.type === 'shell' && t.sessionKey === sKey).length;
     const newTab: TerminalTab = {
       id: nextTabId(),
       projectPath: selectedSession.projectPath,
+      sessionKey: sKey,
       label: `Shell ${shellCount + 1}`,
       type: 'shell',
       command: '',
@@ -223,19 +263,10 @@ export function App() {
   };
 
   const handleCreateSession = (projectPath: string) => {
-    const newTab: TerminalTab = {
-      id: nextTabId(),
-      projectPath,
-      label: 'Claude',
-      initialized: true,
-      type: 'claude',
-      command: '',
-      resumeSessionId: 'new', // Flag: fresh claude, no --continue
-    };
-    setTabs(prev => [...prev, newTab]);
-    setActiveTabId(newTab.id);
+    // Generate a unique conversation ID for this new session
+    const newConvId = `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // Create a synthetic session and add it to the list immediately
+    // Create a synthetic session
     const newSession: ClaudeSession = {
       pid: 0,
       projectPath,
@@ -244,12 +275,26 @@ export function App() {
       status: 'active',
       startTime: new Date().toISOString(),
       command: 'claude (new)',
+      conversationId: newConvId,
     };
-    setSessions(prev => {
-      // Don't add if already exists
-      if (prev.some(s => s.projectPath === projectPath)) return prev;
-      return [newSession, ...prev];
-    });
+
+    const sKey = getSessionKey(newSession);
+
+    const newTab: TerminalTab = {
+      id: nextTabId(),
+      projectPath,
+      sessionKey: sKey,
+      label: 'Claude',
+      initialized: true,
+      type: 'claude',
+      command: '',
+      resumeSessionId: 'new',
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+
+    // Always add as a new session (multiple sessions per project allowed)
+    setSessions(prev => [newSession, ...prev]);
     setSelectedSession(newSession);
   };
 
@@ -258,6 +303,7 @@ export function App() {
     const newTab: TerminalTab = {
       id: nextTabId(),
       projectPath: selectedSession.projectPath,
+      sessionKey: getSessionKey(selectedSession),
       label: command.split(' ')[0] || 'Shell',
       type: 'shell',
       command,
@@ -276,37 +322,36 @@ export function App() {
     } catch {}
   };
 
-  const handleRenameSession = async (projectPath: string, name: string) => {
-    await window.api.sessionMetaRename(projectPath, name);
+  const handleRenameSession = async (key: string, name: string) => {
+    await window.api.sessionMetaRename(key, name);
     await loadSessionMeta();
   };
 
-  const handleArchiveSession = async (projectPath: string) => {
-    await window.api.sessionMetaArchive(projectPath);
+  const handleArchiveSession = async (key: string) => {
+    await window.api.sessionMetaArchive(key);
     await loadSessionMeta();
-    // Deselect if archived
-    if (selectedSession?.projectPath === projectPath) setSelectedSession(null);
+    if (selectedSession && getSessionKey(selectedSession) === key) setSelectedSession(null);
   };
 
-  const handleUnarchiveSession = async (projectPath: string) => {
-    await window.api.sessionMetaUnarchive(projectPath);
+  const handleUnarchiveSession = async (key: string) => {
+    await window.api.sessionMetaUnarchive(key);
     await loadSessionMeta();
   };
 
   // Demo mode overrides
-  const isDemo = settings.demoMode;
   const displaySessions = isDemo ? DEMO_SESSIONS : sessions;
   const displayFiles = isDemo ? DEMO_FILES : modifiedFiles;
   const displayTokenUsage = isDemo ? DEMO_TOKEN_USAGE : tokenUsage;
   const displayBranch = isDemo ? 'feature/jwt-auth' : branch;
 
-  // Enrich sessions with meta (custom names, archive status)
   const enrichedSessions = displaySessions.map(s => {
-    const meta = sessionMeta[s.projectPath];
+    const sKey = getSessionKey(s);
+    const meta = sessionMeta[sKey] || sessionMeta[s.projectPath] || {};
     return {
       ...s,
-      customName: meta?.customName,
-      archived: meta?.archived || false,
+      customName: meta.customName,
+      archived: meta.archived || false,
+      liveStatus: s.liveStatus || 'disconnected',
     };
   });
 
@@ -330,8 +375,9 @@ export function App() {
   const archivedSessions = sortSessions(enrichedSessions.filter(s => s.archived));
 
   // Tabs visible in the tab bar (current session only)
+  const selectedKey = selectedSession ? getSessionKey(selectedSession) : '';
   const visibleTabs = selectedSession
-    ? tabs.filter(tab => tab.projectPath === selectedSession.projectPath)
+    ? tabs.filter(tab => tab.sessionKey === selectedKey)
     : [];
 
   return (
@@ -356,6 +402,7 @@ export function App() {
             onArchive={handleArchiveSession}
             onUnarchive={handleUnarchiveSession}
             onNewSession={handleNewSession}
+            onCreateSessionInProject={handleCreateSession}
             sortMode={sortMode}
             locale={locale}
           />
@@ -366,6 +413,11 @@ export function App() {
           branch={displayBranch}
           locale={locale}
           isDemo={isDemo}
+          terminalPreset={settings.terminalPreset}
+          terminalFontSize={settings.terminalFontSize}
+          appTheme={settings.theme}
+          terminalBgColor={settings.terminalBgColor}
+          terminalBgOpacity={settings.terminalBgOpacity}
           allTabs={tabs}
           visibleTabs={visibleTabs}
           activeTabId={activeTabId}
@@ -373,6 +425,32 @@ export function App() {
           onCloseTab={handleCloseTab}
           onAddShellTab={handleAddShellTab}
           onAddClaudeTab={handleAddClaudeTab}
+          onOpenBranchModal={() => setBranchOpen(true)}
+          onOpenHistory={() => {
+            if (!selectedSession) return;
+            const sKey = getSessionKey(selectedSession);
+            const newTab: TerminalTab = {
+              id: nextTabId(), projectPath: selectedSession.projectPath, sessionKey: sKey,
+              label: 'History', type: 'history', command: '',
+              resumeSessionId: selectedSession.conversationId, initialized: true,
+            };
+            setTabs(prev => [...prev, newTab]);
+            setActiveTabId(newTab.id);
+          }}
+          onOpenNotes={() => {
+            if (!selectedSession) return;
+            const sKey = getSessionKey(selectedSession);
+            const existing = tabs.find(t => t.type === 'notes' && t.sessionKey === sKey);
+            if (existing) { setActiveTabId(existing.id); return; }
+            const newTab: TerminalTab = {
+              id: nextTabId(), projectPath: selectedSession.projectPath, sessionKey: sKey,
+              label: 'Notes', type: 'notes', command: '', initialized: true,
+            };
+            setTabs(prev => [...prev, newTab]);
+            setActiveTabId(newTab.id);
+          }}
+          splitView={splitView}
+          onToggleSplit={() => setSplitView(p => !p)}
         />
 
         {showRightPanel && (settings.showFilesPanel || settings.showActionsPanel) && (
@@ -388,9 +466,11 @@ export function App() {
               const newTab: TerminalTab = {
                 id: nextTabId(),
                 projectPath: selectedSession.projectPath,
+                sessionKey: getSessionKey(selectedSession),
                 label: `diff ${filePath.split('/').pop()}`,
-                type: 'shell',
-                command: `git diff HEAD -- '${filePath}' || git diff -- '${filePath}' || cat '${filePath}'`,
+                type: 'diff',
+                command: '',
+                diffFilePath: filePath,
                 initialized: true,
               };
               setTabs(prev => [...prev, newTab]);
@@ -405,11 +485,13 @@ export function App() {
         tokenUsage={displayTokenUsage}
         sessionCount={displaySessions.length}
         locale={locale}
-        showLeftPanel={showLeftPanel}
-        showRightPanel={showRightPanel}
-        onToggleLeftPanel={() => setShowLeftPanel(p => !p)}
-        onToggleRightPanel={() => setShowRightPanel(p => !p)}
-        onRefreshUsage={loadTokenUsage}
+        showLeftPanel={settings.sessionsPosition === 'right' ? showRightPanel : showLeftPanel}
+        showRightPanel={settings.sessionsPosition === 'right' ? showLeftPanel : showRightPanel}
+        onToggleLeftPanel={() => settings.sessionsPosition === 'right' ? setShowRightPanel(p => !p) : setShowLeftPanel(p => !p)}
+        onToggleRightPanel={() => settings.sessionsPosition === 'right' ? setShowLeftPanel(p => !p) : setShowRightPanel(p => !p)}
+        onRefreshUsage={async () => {
+          try { setTokenUsage(await window.api.getTokenUsage(true)); } catch {}
+        }}
       />
 
       <SettingsPanel
@@ -429,10 +511,27 @@ export function App() {
       />
 
       {selectedSession && (
-        <WorktreeModal
-          isOpen={worktreeOpen}
-          onClose={() => setWorktreeOpen(false)}
-          projectPath={selectedSession.projectPath}
+        <>
+          <WorktreeModal
+            isOpen={worktreeOpen}
+            onClose={() => setWorktreeOpen(false)}
+            projectPath={selectedSession.projectPath}
+            locale={locale}
+          />
+          <BranchModal
+            isOpen={branchOpen}
+            onClose={() => setBranchOpen(false)}
+            projectPath={selectedSession.projectPath}
+            locale={locale}
+          />
+        </>
+      )}
+
+      {updateReady && (
+        <UpdateToast
+          version={updateReady.version}
+          onInstall={() => window.api.updaterInstall()}
+          onDismiss={() => setUpdateReady(null)}
           locale={locale}
         />
       )}

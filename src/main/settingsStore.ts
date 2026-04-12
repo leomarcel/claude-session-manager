@@ -37,9 +37,12 @@ export interface AppSettings {
   terminalPreset: TerminalPreset;
   terminalFontSize: number;
   externalTerminal: ExternalTerminal;
+  terminalBgColor: string;
+  terminalBgOpacity: number;
   notificationsEnabled: boolean;
   demoMode: boolean;
   trayEnabled: boolean;
+  autoUpdate: boolean;
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -104,9 +107,12 @@ export class SettingsStore {
       terminalPreset: 'iterm2' as TerminalPreset,
       terminalFontSize: 13,
       externalTerminal: 'terminal' as ExternalTerminal,
+      terminalBgColor: '',
+      terminalBgOpacity: 100,
       notificationsEnabled: true,
       demoMode: false,
       trayEnabled: true,
+      autoUpdate: true,
       ides,
       quickActions: [...DEFAULT_QUICK_ACTIONS, ...ideActions],
     };
@@ -138,6 +144,8 @@ export class SettingsStore {
     if (saved.terminalPreset !== undefined) merged.terminalPreset = saved.terminalPreset;
     if (saved.terminalFontSize !== undefined) merged.terminalFontSize = saved.terminalFontSize;
     if (saved.externalTerminal !== undefined) merged.externalTerminal = saved.externalTerminal;
+    if (saved.terminalBgColor !== undefined) merged.terminalBgColor = saved.terminalBgColor;
+    if (saved.terminalBgOpacity !== undefined) merged.terminalBgOpacity = saved.terminalBgOpacity;
     if (saved.notificationsEnabled !== undefined) merged.notificationsEnabled = saved.notificationsEnabled;
     if (saved.demoMode !== undefined) merged.demoMode = saved.demoMode;
     if (saved.trayEnabled !== undefined) merged.trayEnabled = saved.trayEnabled;

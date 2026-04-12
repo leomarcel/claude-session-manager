@@ -108,6 +108,46 @@ export class GitManager {
     }
   }
 
+  static getBranches(projectPath: string): { name: string; current: boolean }[] {
+    if (!this.isGitRepo(projectPath)) return [];
+    try {
+      const output = execFileSync('git', ['branch', '--no-color'], {
+        cwd: projectPath, encoding: 'utf-8', timeout: 5000
+      }).trim();
+      if (!output) return [];
+      return output.split('\n').map(line => ({
+        name: line.replace(/^\*?\s+/, '').trim(),
+        current: line.startsWith('*'),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  static switchBranch(projectPath: string, branch: string): { success: boolean; error?: string } {
+    if (!this.isGitRepo(projectPath)) return { success: false, error: 'Not a git repo' };
+    try {
+      execFileSync('git', ['switch', branch], {
+        cwd: projectPath, encoding: 'utf-8', timeout: 10000
+      });
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.stderr || e.message || String(e) };
+    }
+  }
+
+  static createWorktreeForBranch(projectPath: string, branch: string, worktreePath: string): { success: boolean; error?: string } {
+    if (!this.isGitRepo(projectPath)) return { success: false, error: 'Not a git repo' };
+    try {
+      execFileSync('git', ['worktree', 'add', worktreePath, branch], {
+        cwd: projectPath, encoding: 'utf-8', timeout: 10000
+      });
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.stderr || e.message || String(e) };
+    }
+  }
+
   static getStagedFiles(projectPath: string): string[] {
     if (!this.isGitRepo(projectPath)) return [];
     try {
