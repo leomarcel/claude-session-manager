@@ -169,7 +169,7 @@ export function SessionSidebar({
           </div>
         )}
         <div className="session-meta">
-          <span className={`live-badge live-${session.liveStatus || 'disconnected'}`}>
+          <span className={`live-inline live-${session.liveStatus || 'disconnected'}`}>
             <span className={`live-dot live-${session.liveStatus || 'disconnected'}`} />
             {t(locale, liveStatusLabelKey(session.liveStatus || 'disconnected'))}
           </span>

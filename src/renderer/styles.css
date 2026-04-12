@@ -1101,27 +1101,23 @@
   background: rgba(124, 106, 239, 0.1);
 }
 
-/* Live status badges (real-time Claude session state) */
-.live-badge {
+/* Live status — inline dot + label (no pill) */
+.live-inline {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 9px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  border: 1px solid transparent;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
-.live-badge.live-running { background: rgba(80, 227, 160, 0.12); color: var(--green); border-color: rgba(80, 227, 160, 0.3); }
-.live-badge.live-tool_executing { background: rgba(100, 181, 246, 0.14); color: var(--blue); border-color: rgba(100, 181, 246, 0.3); }
-.live-badge.live-waiting_input { background: rgba(255, 176, 68, 0.14); color: #ffb044; border-color: rgba(255, 176, 68, 0.3); }
-.live-badge.live-idle { background: rgba(160, 160, 176, 0.1); color: var(--text-muted); border-color: var(--border); }
-.live-badge.live-completed { background: rgba(80, 227, 160, 0.08); color: var(--green); border-color: rgba(80, 227, 160, 0.2); }
-.live-badge.live-crashed { background: rgba(255, 107, 122, 0.12); color: var(--red); border-color: rgba(255, 107, 122, 0.3); }
-.live-badge.live-disconnected { background: rgba(160, 160, 176, 0.06); color: var(--text-muted); border-color: var(--border); border-style: dashed; }
+.live-inline.live-running { color: var(--green); }
+.live-inline.live-tool_executing { color: var(--blue); }
+.live-inline.live-waiting_input { color: #ffb044; }
+.live-inline.live-completed { color: var(--green); opacity: 0.75; }
+.live-inline.live-crashed { color: var(--red); }
+.live-inline.live-idle,
+.live-inline.live-disconnected { color: var(--text-muted); }
 
 .live-dot {
   width: 7px;
@@ -1138,8 +1134,6 @@
 .live-dot.live-completed { background: var(--green); opacity: 0.7; }
 .live-dot.live-crashed { background: var(--red); }
 .live-dot.live-disconnected { background: transparent; border: 1px dashed var(--text-muted); }
-
-.live-badge .live-dot { width: 5px; height: 5px; }
 
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }

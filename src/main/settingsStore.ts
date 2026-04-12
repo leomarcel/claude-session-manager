@@ -203,16 +203,31 @@ export class SettingsStore {
   }
 
   private detectIDE(ide: Omit<IDEInfo, 'installed'>): boolean {
+    // Fallback .app names when the CLI command isn't in PATH
+    const appFallbacks: Record<string, string[]> = {
+      vscode: ['Visual Studio Code.app', 'VSCodium.app'],
+      cursor: ['Cursor.app'],
+      sublime: ['Sublime Text.app'],
+      zed: ['Zed.app', 'Zed Preview.app'],
+    };
+    const appExists = (appNames: string[]): boolean => {
+      const homeApps = path.join(os.homedir(), 'Applications');
+      for (const name of appNames) {
+        if (fs.existsSync(path.join('/Applications', name))) return true;
+        if (fs.existsSync(path.join(homeApps, name))) return true;
+      }
+      return false;
+    };
+
     try {
       if (ide.command === 'open' && ide.args[0] === '-a') {
-        // Check if macOS app exists
+        // JetBrains / open -a based detection
         const appName = ide.args[1];
         const paths = [
           `/Applications/${appName}.app`,
           `${os.homedir()}/Applications/${appName}.app`,
           `/Applications/JetBrains Toolbox/${appName}.app`,
         ];
-        // Also check mdfind for JetBrains apps (they have versioned names)
         try {
           const safeName = appName.replace(/"/g, '');
           const found = execFileSync('mdfind', [
@@ -220,13 +235,33 @@ export class SettingsStore {
           ], { encoding: 'utf-8', timeout: 3000 }).trim();
           if (found) return true;
         } catch {}
-
         return paths.some(p => fs.existsSync(p));
-      } else {
-        // Check if command exists in PATH
-        execFileSync('which', [ide.command], { encoding: 'utf-8', timeout: 2000 });
-        return true;
       }
+
+      // CLI-based IDEs: try PATH with shell-augmented env first
+      const extraPath = [
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+        `${os.homedir()}/.local/bin`,
+        `${os.homedir()}/.cargo/bin`,
+      ].join(':');
+      const combinedPath = `${process.env.PATH || ''}:${extraPath}`;
+      try {
+        execFileSync('which', [ide.command], {
+          encoding: 'utf-8',
+          timeout: 2000,
+          env: { ...process.env, PATH: combinedPath },
+        });
+        return true;
+      } catch {}
+
+      // Fallback: check for the .app bundle directly
+      const apps = appFallbacks[ide.id];
+      if (apps && appExists(apps)) return true;
+
+      return false;
     } catch {
       return false;
     }

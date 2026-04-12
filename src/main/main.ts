@@ -1,5 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, Notification, Tray, Menu, nativeImage } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { execFile, execFileSync } from 'child_process';
 import { SessionDetector } from './sessionDetector';
 import { GitManager } from './gitManager';
@@ -53,9 +55,12 @@ function createWindow() {
   });
 }
 
-function execFilePromise(cmd: string, args: string[]): Promise<void> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, () => resolve());
+function execFilePromise(cmd: string, args: string[], opts?: { env?: NodeJS.ProcessEnv }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, opts || {}, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
   });
 }
 
@@ -182,12 +187,48 @@ function setupIPC() {
     }
   });
 
+  // Fallback .app bundle names for CLI-based IDEs when the CLI command isn't in PATH
+  const IDE_APP_FALLBACK: Record<string, string> = {
+    vscode: 'Visual Studio Code',
+    cursor: 'Cursor',
+    sublime: 'Sublime Text',
+    zed: 'Zed',
+  };
+
+  // Run a CLI IDE command with a PATH-augmented env, fall back to `open -a` if the CLI is missing
+  const launchIDE = async (ideId: string, command: string, args: string[]) => {
+    const extraPath = [
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      `${os.homedir()}/.local/bin`,
+      `${os.homedir()}/.cargo/bin`,
+    ].join(':');
+    const combinedPath = `${process.env.PATH || ''}:${extraPath}`;
+    try {
+      await execFilePromise(command, args, { env: { ...process.env, PATH: combinedPath } });
+      return;
+    } catch (e: any) {
+      const fallbackApp = IDE_APP_FALLBACK[ideId];
+      if (fallbackApp) {
+        logger.add('info', 'action', `CLI '${command}' not available, falling back to open -a '${fallbackApp}'`);
+        await execFilePromise('open', ['-a', fallbackApp, ...args]);
+        return;
+      }
+      throw e;
+    }
+  };
+
   ipcMain.handle('action-open-ide', async (_event, projectPath: string, ideId: string) => {
     const settings = settingsStore.get();
     const ide = settings.ides.find(i => i.id === ideId);
-    if (ide) {
-      const args = ide.args.map(a => a === '.' ? projectPath : a);
+    if (!ide) return;
+    const args = ide.args.map(a => a === '.' ? projectPath : a);
+    if (ide.command === 'open' && ide.args[0] === '-a') {
       await execFilePromise(ide.command, args);
+    } else {
+      await launchIDE(ideId, ide.command, args);
     }
   });
 
@@ -201,11 +242,10 @@ function setupIPC() {
     const fullFilePath = path.join(projectPath, filePath);
 
     if (ide.command === 'open' && ide.args[0] === '-a') {
-      // JetBrains IDEs: open -a "PhpStorm" --args <file>
+      // JetBrains IDEs: open -a "PhpStorm" <file>
       await execFilePromise('open', ['-a', ide.args[1], fullFilePath]);
     } else {
-      // CLI-based IDEs (code, cursor, subl, zed): command <file>
-      await execFilePromise(ide.command, [fullFilePath]);
+      await launchIDE(ideId, ide.command, [fullFilePath]);
     }
   });
 
@@ -285,6 +325,30 @@ function setupIPC() {
     autoUpdater.quitAndInstall();
   });
   ipcMain.handle('get-app-version', async () => app.getVersion());
+
+  // --- Notes (file-backed, per project path) ---
+  const notesDir = path.join(os.homedir(), '.claude-session-manager', 'notes');
+  try { if (!fs.existsSync(notesDir)) fs.mkdirSync(notesDir, { recursive: true }); } catch {}
+  const notesFileFor = (projectPath: string) => {
+    const safe = projectPath.replace(/[^a-zA-Z0-9]/g, '_');
+    return path.join(notesDir, `${safe}.md`);
+  };
+  ipcMain.handle('notes-load', async (_event, projectPath: string) => {
+    try {
+      const file = notesFileFor(projectPath);
+      if (fs.existsSync(file)) return fs.readFileSync(file, 'utf-8');
+    } catch (e: any) {
+      logger.add('warn', 'notes', `load failed: ${e.message}`);
+    }
+    return '';
+  });
+  ipcMain.handle('notes-save', async (_event, projectPath: string, content: string) => {
+    try {
+      fs.writeFileSync(notesFileFor(projectPath), content, 'utf-8');
+    } catch (e: any) {
+      logger.add('error', 'notes', `save failed: ${e.message}`);
+    }
+  });
 
   // --- Auto-refresh + notifications ---
   let refreshInterval: NodeJS.Timeout | null = null;

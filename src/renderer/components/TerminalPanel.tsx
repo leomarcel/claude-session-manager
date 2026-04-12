@@ -508,17 +508,40 @@ function HistoryTabView({ projectPath, sessionId, locale }: { projectPath: strin
   );
 }
 
-// Notes component (persisted in localStorage)
+// Notes component — persisted to ~/.claude-session-manager/notes/<projectPath>.md via IPC
 function NotesTabView({ projectPath }: { projectPath: string }) {
-  const storageKey = `notes:${projectPath}`;
-  const [text, setText] = useState(() => {
-    try { return localStorage.getItem(storageKey) || ''; } catch { return ''; }
-  });
+  const [text, setText] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const saveTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.api.notesLoad(projectPath).then(content => {
+      if (!cancelled) {
+        setText(content || '');
+        setLoaded(true);
+      }
+    }).catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [projectPath]);
 
   const handleChange = (val: string) => {
     setText(val);
-    try { localStorage.setItem(storageKey, val); } catch {}
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      window.api.notesSave(projectPath, val).catch(() => {});
+    }, 300);
   };
+
+  // Flush any pending save on unmount so unloading the tab never drops the last keystrokes
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        window.api.notesSave(projectPath, text).catch(() => {});
+      }
+    };
+  }, [projectPath, text]);
 
   return (
     <div className="notes-tab-content">
@@ -526,7 +549,7 @@ function NotesTabView({ projectPath }: { projectPath: string }) {
         className="notes-textarea"
         value={text}
         onChange={e => handleChange(e.target.value)}
-        placeholder="Write your notes here..."
+        placeholder={loaded ? 'Write your notes here...' : 'Loading...'}
         spellCheck={false}
       />
     </div>

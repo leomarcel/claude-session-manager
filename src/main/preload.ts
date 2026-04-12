@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('api', {
   updaterInstall: () => ipcRenderer.invoke('updater-install'),
   updaterCheck: () => ipcRenderer.invoke('updater-check'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  notesLoad: (projectPath: string) => ipcRenderer.invoke('notes-load', projectPath),
+  notesSave: (projectPath: string, content: string) => ipcRenderer.invoke('notes-save', projectPath, content),
 
   // Shortcuts
   onShortcut: (callback: (action: string) => void) => {

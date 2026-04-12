@@ -175,6 +175,8 @@ export interface ElectronAPI {
   updaterInstall: () => Promise<void>;
   updaterCheck: () => Promise<{ currentVersion?: string; updateAvailable?: boolean; latestVersion?: string; error?: string }>;
   getAppVersion: () => Promise<string>;
+  notesLoad: (projectPath: string) => Promise<string>;
+  notesSave: (projectPath: string, content: string) => Promise<void>;
   onShortcut: (callback: (action: string) => void) => () => void;
   onOpenSettings: (callback: () => void) => () => void;
   updateTraySessions: (sessions: { projectName: string; projectPath: string; status: string }[], usage?: string) => void;
