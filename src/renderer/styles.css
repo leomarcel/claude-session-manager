@@ -1608,6 +1608,10 @@
   background: var(--bg-hover);
 }
 
+.context-menu-item.archive {
+  color: var(--orange);
+}
+
 .context-menu-item.archive:hover {
   background: rgba(255, 171, 112, 0.1);
   color: var(--orange);

@@ -17,6 +17,7 @@ export const en = {
     archive: 'Archive',
     unarchive: 'Unarchive',
     deletePermanently: 'Delete permanently',
+    viewHistory: 'View history',
     archived: 'Archived',
     archivedEmpty: 'No archived sessions',
     renamePlaceholder: 'Session name...',

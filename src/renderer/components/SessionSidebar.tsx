@@ -13,6 +13,7 @@ interface Props {
   onArchive: (key: string) => void;
   onUnarchive: (key: string) => void;
   onDelete: (key: string) => void;
+  onViewHistory: (session: ClaudeSession) => void;
   onNewSession: () => void;
   onCreateSessionInProject: (projectPath: string) => void;
   sortMode: SessionSortMode;
@@ -55,7 +56,7 @@ function getSessionDisplayName(session: ClaudeSession): string {
 
 export function SessionSidebar({
   sessions, archivedSessions, selectedSession,
-  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onNewSession, onCreateSessionInProject, sortMode, locale
+  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onNewSession, onCreateSessionInProject, sortMode, locale
 }: Props) {
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -470,6 +471,14 @@ export function SessionSidebar({
           className="context-menu"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
+          <button
+            className="context-menu-item"
+            onClick={() => { onViewHistory(contextMenu.session); closeContextMenu(); }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {t(locale, 'sidebar.viewHistory')}
+          </button>
+          <div className="context-menu-divider" />
           <button className="context-menu-item" onClick={() => startRename(contextMenu.session)}>
             &#9998; {t(locale, 'sidebar.rename')}
           </button>

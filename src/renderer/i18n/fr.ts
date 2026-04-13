@@ -17,6 +17,7 @@ export const fr = {
     archive: 'Archiver',
     unarchive: 'Desarchiver',
     deletePermanently: 'Supprimer definitivement',
+    viewHistory: 'Voir l\'historique',
     archived: 'Archives',
     archivedEmpty: 'Aucune session archivee',
     renamePlaceholder: 'Nom de la session...',

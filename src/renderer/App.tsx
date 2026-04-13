@@ -363,6 +363,33 @@ export function App() {
     await loadSessionMeta();
   };
 
+  // Open the history tab for a session WITHOUT spawning a Claude pty
+  const handleViewHistory = (session: ClaudeSession) => {
+    setSelectedSession(session);
+    const sKey = getSessionKey(session);
+    const existing = tabs.find(t =>
+      t.type === 'history' &&
+      t.sessionKey === sKey &&
+      t.resumeSessionId === session.conversationId
+    );
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+    const newTab: TerminalTab = {
+      id: nextTabId(),
+      projectPath: session.projectPath,
+      sessionKey: sKey,
+      label: 'History',
+      type: 'history',
+      command: '',
+      resumeSessionId: session.conversationId,
+      initialized: true,
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+  };
+
   const handleDeleteSession = async (key: string) => {
     const session = sessions.find(s => getSessionKey(s) === key);
     if (!session) return;
@@ -467,6 +494,7 @@ export function App() {
             onArchive={handleArchiveSession}
             onUnarchive={handleUnarchiveSession}
             onDelete={handleDeleteSession}
+            onViewHistory={handleViewHistory}
             onNewSession={handleNewSession}
             onCreateSessionInProject={handleCreateSession}
             sortMode={sortMode}
