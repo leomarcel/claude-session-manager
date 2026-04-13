@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ClaudeSession, ModifiedFile, TokenUsage, AppSettings, TerminalTab, SavedTerminalState, SessionMeta } from './types';
 import { Locale, t } from './i18n';
 import { DEMO_SESSIONS, DEMO_FILES, DEMO_TOKEN_USAGE } from './demoData';
@@ -213,7 +213,14 @@ export function App() {
     if (!selectedSession) return;
     const key = getSessionKey(selectedSession);
     const fresh = sessions.find(s => getSessionKey(s) === key);
-    if (fresh && fresh !== selectedSession) {
+    if (!fresh) return;
+    if (
+      fresh.pid !== selectedSession.pid ||
+      fresh.status !== selectedSession.status ||
+      fresh.liveStatus !== selectedSession.liveStatus ||
+      fresh.liveDetail !== selectedSession.liveDetail ||
+      fresh.messageCount !== selectedSession.messageCount
+    ) {
       setSelectedSession(fresh);
     }
   }, [sessions]);
@@ -635,10 +642,14 @@ export function App() {
   const archivedSessions = sortSessions(enrichedSessions.filter(s => s.archived));
 
   // Tabs visible in the tab bar (current session only)
-  const selectedKey = selectedSession ? getSessionKey(selectedSession) : '';
-  const visibleTabs = selectedSession
-    ? tabs.filter(tab => tab.sessionKey === selectedKey)
-    : [];
+  const selectedKey = useMemo(
+    () => selectedSession ? getSessionKey(selectedSession) : '',
+    [selectedSession]
+  );
+  const visibleTabs = useMemo(
+    () => selectedSession ? tabs.filter(tab => tab.sessionKey === selectedKey) : [],
+    [selectedSession, tabs, selectedKey]
+  );
 
   return (
     <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}`}>

@@ -42,6 +42,8 @@ interface TermInstance {
   ptyId: string | null;
   container: HTMLDivElement;
   ready: boolean;
+  lastCols?: number;
+  lastRows?: number;
 }
 
 export function TerminalPanel({
@@ -50,6 +52,7 @@ export function TerminalPanel({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef<Map<string, TermInstance>>(new Map());
+  const lastFocusedTabRef = useRef<string | null>(null);
   const [loadingTabIds, setLoadingTabIds] = useState<Set<string>>(new Set());
   const [tabStatuses, setTabStatuses] = useState<Map<string, 'busy' | 'idle'>>(new Map());
   const busyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -311,10 +314,17 @@ export function TerminalPanel({
       if (isVisible) {
         setTimeout(() => {
           inst.fitAddon.fit();
-          if (inst.ptyId) {
-            window.api.ptyResize(inst.ptyId, inst.terminal.cols, inst.terminal.rows);
+          const cols = inst.terminal.cols;
+          const rows = inst.terminal.rows;
+          if (inst.ptyId && (cols !== inst.lastCols || rows !== inst.lastRows)) {
+            window.api.ptyResize(inst.ptyId, cols, rows);
+            inst.lastCols = cols;
+            inst.lastRows = rows;
           }
-          if (id === activeTabId) inst.terminal.focus();
+          if (id === activeTabId && lastFocusedTabRef.current !== activeTabId) {
+            inst.terminal.focus();
+            lastFocusedTabRef.current = activeTabId;
+          }
         }, 30);
       }
     }
