@@ -527,35 +527,48 @@ export function App() {
       : 'Permanently delete this session? The JSONL file will be removed from disk and claude --resume will no longer find it.';
     if (!window.confirm(msg)) return;
 
-    // 1. Close any in-app tabs bound to this session and destroy their ptys
+    // Snapshot the tabs we need to destroy BEFORE any state mutations
     const tabsToClose = tabs.filter(t => t.sessionKey === key);
+    const closedIds = new Set(tabsToClose.map(t => t.id));
+    const isCurrentlySelected = !!selectedSession && getSessionKey(selectedSession) === key;
+
+    // 1. Reset UI state synchronously up front so React never renders an
+    //    intermediate state with selectedSession pointing at a deleted session
+    //    (which was the trigger for the crash — RightSidebar / TerminalPanel
+    //    tried to read fields off a stale session while tabs were already gone).
+    if (isCurrentlySelected) setSelectedSession(null);
+    if (closedIds.size > 0) {
+      setTabs(prev => prev.filter(t => !closedIds.has(t.id)));
+      setActiveTabId(prev => (prev && closedIds.has(prev) ? null : prev));
+    }
+
+    // 2. Destroy the ptys (best-effort, errors swallowed)
     for (const tab of tabsToClose) {
       if (tab.ptyId) {
         try { await window.api.ptyDestroy(tab.ptyId); } catch {}
       }
     }
-    if (tabsToClose.length > 0) {
-      const closedIds = new Set(tabsToClose.map(t => t.id));
-      setTabs(prev => prev.filter(t => !closedIds.has(t.id)));
-      setActiveTabId(prev => {
-        if (!prev || !closedIds.has(prev)) return prev;
-        const remaining = tabs.filter(t => !closedIds.has(t.id));
-        return remaining.length > 0 ? remaining[0].id : null;
+
+    // 3. Backend delete: kill pid + rm jsonl + rm meta
+    try {
+      await window.api.sessionDelete({
+        key,
+        pid: session.pid || 0,
+        projectPath: session.projectPath,
+        conversationId: session.conversationId,
       });
+    } catch (e: any) {
+      toast.show(`Delete failed: ${e?.message || 'unknown error'}`, 'error');
+      return;
     }
 
-    // 2. Main handles: kill pid + rm jsonl + rm meta
-    await window.api.sessionDelete({
-      key,
-      pid: session.pid || 0,
-      projectPath: session.projectPath,
-      conversationId: session.conversationId,
-    });
+    // 4. Reload
+    try {
+      await loadSessionMeta();
+      await loadSessions();
+    } catch {}
 
-    // 3. Reload
-    await loadSessionMeta();
-    await loadSessions();
-    if (selectedSession && getSessionKey(selectedSession) === key) setSelectedSession(null);
+    toast.show(locale === 'fr' ? 'Session supprimee' : 'Session deleted', 'success');
   };
 
   // Demo mode overrides
