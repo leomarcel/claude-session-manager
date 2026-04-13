@@ -302,7 +302,7 @@ export function SessionSidebar({
             <span className={`live-dot live-${session.liveStatus || 'disconnected'}`} />
             {t(locale, liveStatusLabelKey(session.liveStatus || 'disconnected'))}
           </span>
-          <span className="session-model">{session.model}</span>
+          {session.model && session.model !== 'Claude' && <span className="session-model">{session.model}</span>}
         </div>
         {session.liveDetail && (
           <div className="session-live-detail" title={session.liveDetail}>

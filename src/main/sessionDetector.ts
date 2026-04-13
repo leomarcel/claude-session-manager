@@ -385,23 +385,51 @@ export class SessionDetector {
     return `Claude ${tierName} ${major}.${minor}`;
   }
 
-  // Read the first lines of a JSONL file to find the model ID.
+  // Scan a chunk of JSONL text and return the first real model ID found.
+  // Uses line-by-line JSON parsing first, then regex as fallback for partial lines.
+  private static extractModelFromChunk(chunk: string): string | undefined {
+    for (const line of chunk.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        const rawModel = (entry.message && entry.message.model) || entry.model;
+        if (rawModel && rawModel !== '<synthetic>') {
+          return SessionDetector.formatModelName(rawModel);
+        }
+      } catch {}
+    }
+    // Fallback: regex on raw text — works even on partial/truncated lines
+    const m = chunk.match(/"model":"(claude-[a-z]+-\d+-\d+[^"]*)"/);
+    if (m && m[1] !== '<synthetic>') {
+      return SessionDetector.formatModelName(m[1]);
+    }
+    return undefined;
+  }
+
+  // Read start + end of a JSONL file to find the model ID.
+  // The assistant message (which holds the model) can be beyond the first few KB
+  // when the user message is large, so we also sample the tail of the file.
   private readModelFromJsonl(jsonlPath: string): string | undefined {
     try {
+      const stat = fs.statSync(jsonlPath);
+      const CHUNK = 4096;
       const fd = fs.openSync(jsonlPath, 'r');
-      const buf = Buffer.alloc(4096);
-      const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
-      fs.closeSync(fd);
-      const chunk = buf.toString('utf-8', 0, bytesRead);
-      for (const line of chunk.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const entry = JSON.parse(line);
-          if (entry.model && entry.model !== '<synthetic>') {
-            return SessionDetector.formatModelName(entry.model);
-          }
-        } catch {}
+
+      // Read from the start
+      const head = Buffer.alloc(CHUNK);
+      const headBytes = fs.readSync(fd, head, 0, CHUNK, 0);
+      const headModel = SessionDetector.extractModelFromChunk(head.toString('utf-8', 0, headBytes));
+      if (headModel) { fs.closeSync(fd); return headModel; }
+
+      // Not found — read from the end
+      if (stat.size > CHUNK) {
+        const tail = Buffer.alloc(CHUNK);
+        const tailBytes = fs.readSync(fd, tail, 0, CHUNK, Math.max(0, stat.size - CHUNK));
+        const tailModel = SessionDetector.extractModelFromChunk(tail.toString('utf-8', 0, tailBytes));
+        if (tailModel) { fs.closeSync(fd); return tailModel; }
       }
+
+      fs.closeSync(fd);
     } catch {}
     return undefined;
   }
@@ -563,10 +591,11 @@ export class SessionDetector {
 
     try {
       const filePath = path.join(projectDir, fileName);
+      const stat = fs.statSync(filePath);
+      const CHUNK = 8192;
       const fd = fs.openSync(filePath, 'r');
-      const buf = Buffer.alloc(8192);
-      const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
-      fs.closeSync(fd);
+      const buf = Buffer.alloc(CHUNK);
+      const bytesRead = fs.readSync(fd, buf, 0, CHUNK, 0);
       const chunk = buf.toString('utf-8', 0, bytesRead);
       const lines = chunk.split('\n');
 
@@ -583,12 +612,22 @@ export class SessionDetector {
               if (textBlock?.text) firstPrompt = textBlock.text.length > 120 ? textBlock.text.slice(0, 120) + '...' : textBlock.text;
             }
           }
-          if (!model && entry.model && entry.model !== '<synthetic>') {
-            model = SessionDetector.formatModelName(entry.model);
+          const rawModel = (entry.message && entry.message.model) || entry.model;
+          if (!model && rawModel && rawModel !== '<synthetic>') {
+            model = SessionDetector.formatModelName(rawModel);
           }
           if (firstPrompt && model) break;
         } catch {}
       }
+
+      // Model not found in first chunk — sample the tail of the file
+      if (!model && stat.size > CHUNK) {
+        const tail = Buffer.alloc(CHUNK);
+        const tailBytes = fs.readSync(fd, tail, 0, CHUNK, Math.max(0, stat.size - CHUNK));
+        model = SessionDetector.extractModelFromChunk(tail.toString('utf-8', 0, tailBytes));
+      }
+
+      fs.closeSync(fd);
     } catch {}
 
     return { modified: new Date(mtime).toISOString(), firstPrompt, model };
@@ -643,11 +682,11 @@ export class SessionDetector {
     // Read JSONL to extract firstPrompt (if not in index) and model
     try {
       const filePath = path.join(projectDir, latestFile.name);
+      const stat = fs.statSync(filePath);
+      const CHUNK = 8192;
       const fd = fs.openSync(filePath, 'r');
-      // Read first 8KB to find the first user message (fast, avoids reading huge files)
-      const buf = Buffer.alloc(8192);
-      const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
-      fs.closeSync(fd);
+      const buf = Buffer.alloc(CHUNK);
+      const bytesRead = fs.readSync(fd, buf, 0, CHUNK, 0);
       const chunk = buf.toString('utf-8', 0, bytesRead);
       const lines = chunk.split('\n');
 
@@ -668,12 +707,22 @@ export class SessionDetector {
             }
           }
           // Extract model from assistant messages
-          if (!model && entry.model && entry.model !== '<synthetic>') {
-            model = SessionDetector.formatModelName(entry.model);
+          const rawModel = (entry.message && entry.message.model) || entry.model;
+          if (!model && rawModel && rawModel !== '<synthetic>') {
+            model = SessionDetector.formatModelName(rawModel);
           }
           if (firstPrompt && model) break;
         } catch {}
       }
+
+      // Model not found in first chunk — sample the tail of the file
+      if (!model && stat.size > CHUNK) {
+        const tail = Buffer.alloc(CHUNK);
+        const tailBytes = fs.readSync(fd, tail, 0, CHUNK, Math.max(0, stat.size - CHUNK));
+        model = SessionDetector.extractModelFromChunk(tail.toString('utf-8', 0, tailBytes));
+      }
+
+      fs.closeSync(fd);
     } catch {}
 
     return {
