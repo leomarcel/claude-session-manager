@@ -48,6 +48,15 @@
   background: #f8f8fc;
 }
 
+.theme-light .tab-item.active {
+  background: #f8f8fc;
+  color: var(--text-primary);
+}
+
+.theme-light .tab-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
 .theme-light .demo-dim { color: #888898; }
 .theme-light .demo-separator { color: #d0d0d8; }
 .theme-light .demo-assistant { color: #1a1a2e; }

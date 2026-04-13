@@ -97,6 +97,7 @@ export interface AppSettings {
   showFilesPanel: boolean;
   showActionsPanel: boolean;
   theme: AppTheme;
+  terminalTheme: AppTheme;
   terminalPreset: TerminalPreset;
   terminalFontSize: number;
   externalTerminal: ExternalTerminal;

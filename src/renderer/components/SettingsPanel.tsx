@@ -208,7 +208,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                 </div>
               </div>
 
-              {/* Theme */}
+              {/* UI Theme */}
               <div className="settings-group">
                 <label className="settings-label">{t(locale, 'settings.theme')}</label>
                 <div className="settings-radio-group">
@@ -218,6 +218,21 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                   </label>
                   <label className={`settings-radio ${draft.theme === 'light' ? 'active' : ''}`}>
                     <input type="radio" name="theme" checked={draft.theme === 'light'} onChange={() => updateDraft({ theme: 'light' })} />
+                    {t(locale, 'settings.themeLight')}
+                  </label>
+                </div>
+              </div>
+
+              {/* Terminal Theme (independent from UI theme) */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.terminalTheme')}</label>
+                <div className="settings-radio-group">
+                  <label className={`settings-radio ${(draft.terminalTheme || draft.theme) === 'dark' ? 'active' : ''}`}>
+                    <input type="radio" name="terminalTheme" checked={(draft.terminalTheme || draft.theme) === 'dark'} onChange={() => updateDraft({ terminalTheme: 'dark' })} />
+                    {t(locale, 'settings.themeDark')}
+                  </label>
+                  <label className={`settings-radio ${(draft.terminalTheme || draft.theme) === 'light' ? 'active' : ''}`}>
+                    <input type="radio" name="terminalTheme" checked={(draft.terminalTheme || draft.theme) === 'light'} onChange={() => updateDraft({ terminalTheme: 'light' })} />
                     {t(locale, 'settings.themeLight')}
                   </label>
                 </div>

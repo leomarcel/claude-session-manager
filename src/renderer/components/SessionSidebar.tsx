@@ -14,6 +14,7 @@ interface Props {
   onUnarchive: (key: string) => void;
   onDelete: (key: string) => void;
   onViewHistory: (session: ClaudeSession) => void;
+  onReconnect: (session: ClaudeSession) => void;
   onNewSession: () => void;
   onCreateSessionInProject: (projectPath: string) => void;
   sortMode: SessionSortMode;
@@ -56,7 +57,7 @@ function getSessionDisplayName(session: ClaudeSession): string {
 
 export function SessionSidebar({
   sessions, archivedSessions, selectedSession,
-  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onNewSession, onCreateSessionInProject, sortMode, locale
+  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onReconnect, onNewSession, onCreateSessionInProject, sortMode, locale
 }: Props) {
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -477,6 +478,13 @@ export function SessionSidebar({
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             {t(locale, 'sidebar.viewHistory')}
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => { onReconnect(contextMenu.session); closeContextMenu(); }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            {t(locale, 'sidebar.reconnect')}
           </button>
           <div className="context-menu-divider" />
           <button className="context-menu-item" onClick={() => startRename(contextMenu.session)}>

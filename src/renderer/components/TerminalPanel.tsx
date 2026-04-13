@@ -259,6 +259,15 @@ export function TerminalPanel({
     }
   }, [activeTabId, splitView, visibleTabs]);
 
+  // Apply theme/preset changes live to existing terminals
+  useEffect(() => {
+    const newTheme = getTermTheme();
+    for (const [, inst] of instancesRef.current) {
+      inst.terminal.options.theme = newTheme;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appTheme, terminalPreset]);
+
   // Resize observer
   useEffect(() => {
     if (!containerRef.current) return;

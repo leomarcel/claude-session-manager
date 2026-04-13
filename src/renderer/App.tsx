@@ -16,7 +16,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   locale: 'en', refreshInterval: 15, usageRefreshInterval: 5,
   sessionsPosition: 'left', sessionsSortMode: 'project',
   showFilesPanel: true, showActionsPanel: true,
-  theme: 'dark', terminalPreset: 'iterm2', terminalFontSize: 13, externalTerminal: 'terminal',
+  theme: 'dark', terminalTheme: 'dark', terminalPreset: 'iterm2', terminalFontSize: 13, externalTerminal: 'terminal',
   notificationsEnabled: true, demoMode: false, trayEnabled: true, autoUpdate: true,
   terminalBgColor: '', terminalBgOpacity: 100,
   ides: [], quickActions: [],
@@ -79,9 +79,12 @@ export function App() {
       loadSessionMeta(),
       window.api.terminalsLoad().then((saved) => {
         if (saved.tabs.length > 0) {
-          // Restored tabs start uninitialized — PTY created only when selected
-          setTabs(saved.tabs.map(t => ({ ...t, initialized: false })));
-          setActiveTabId(saved.activeTabId || saved.tabs[0].id);
+          // Restored tabs start uninitialized except the active one,
+          // which must be initialized so its PTY spawns on mount and the
+          // user doesn't see a blank terminal.
+          const activeId = saved.activeTabId || saved.tabs[0].id;
+          setTabs(saved.tabs.map(t => ({ ...t, initialized: t.id === activeId })));
+          setActiveTabId(activeId);
         }
       }).catch(() => {}),
     ]).finally(() => {
@@ -247,6 +250,15 @@ export function App() {
     setActiveTabId(newTab.id);
   };
 
+  // Activate a tab and lazily initialize it so clicking a restored
+  // (initialized: false) tab in the bar still spawns its PTY on demand.
+  const handleActivateTab = (tabId: string) => {
+    setActiveTabId(tabId);
+    setTabs(prev => prev.map(t =>
+      t.id === tabId && t.initialized === false ? { ...t, initialized: true } : t
+    ));
+  };
+
   const handleCloseTab = (tabId: string) => {
     const remaining = tabs.filter(t => t.id !== tabId);
     setTabs(remaining);
@@ -361,6 +373,44 @@ export function App() {
   const handleUnarchiveSession = async (key: string) => {
     await window.api.sessionMetaUnarchive(key);
     await loadSessionMeta();
+  };
+
+  // Reconnect: destroy the existing Claude pty for a session and spawn a fresh
+  // one in its place. Useful when the terminal got stuck or shows blank.
+  const handleReconnectSession = async (session: ClaudeSession) => {
+    setSelectedSession(session);
+    const sKey = getSessionKey(session);
+    const claudeTabs = tabs.filter(t => t.sessionKey === sKey && t.type === 'claude');
+
+    if (claudeTabs.length === 0) {
+      // No existing tab — fall back to the regular select flow which will create one
+      handleSelectSession(session);
+      return;
+    }
+
+    // Destroy the underlying ptys so the mount effect spawns fresh ones
+    for (const tab of claudeTabs) {
+      if (tab.ptyId) {
+        try { await window.api.ptyDestroy(tab.ptyId); } catch {}
+      }
+    }
+
+    // Replace each old claude tab with a new one (new id forces remount)
+    const oldIds = new Set(claudeTabs.map(t => t.id));
+    const replacements: TerminalTab[] = claudeTabs.map(t => ({
+      ...t,
+      id: nextTabId(),
+      initialized: true,
+      ptyId: undefined,
+    }));
+    const wasActive = activeTabId && oldIds.has(activeTabId);
+    setTabs(prev => {
+      const kept = prev.filter(t => !oldIds.has(t.id));
+      return [...kept, ...replacements];
+    });
+    if (wasActive || replacements.length > 0) {
+      setActiveTabId(replacements[0].id);
+    }
   };
 
   // Open the history tab for a session WITHOUT spawning a Claude pty
@@ -495,6 +545,7 @@ export function App() {
             onUnarchive={handleUnarchiveSession}
             onDelete={handleDeleteSession}
             onViewHistory={handleViewHistory}
+            onReconnect={handleReconnectSession}
             onNewSession={handleNewSession}
             onCreateSessionInProject={handleCreateSession}
             sortMode={sortMode}
@@ -509,13 +560,13 @@ export function App() {
           isDemo={isDemo}
           terminalPreset={settings.terminalPreset}
           terminalFontSize={settings.terminalFontSize}
-          appTheme={settings.theme}
+          appTheme={settings.terminalTheme || settings.theme}
           terminalBgColor={settings.terminalBgColor}
           terminalBgOpacity={settings.terminalBgOpacity}
           allTabs={tabs}
           visibleTabs={visibleTabs}
           activeTabId={activeTabId}
-          onActivateTab={setActiveTabId}
+          onActivateTab={handleActivateTab}
           onCloseTab={handleCloseTab}
           onAddShellTab={handleAddShellTab}
           onAddClaudeTab={handleAddClaudeTab}

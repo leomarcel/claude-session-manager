@@ -34,6 +34,7 @@ export interface AppSettings {
   showFilesPanel: boolean;
   showActionsPanel: boolean;
   theme: AppTheme;
+  terminalTheme: AppTheme;
   terminalPreset: TerminalPreset;
   terminalFontSize: number;
   externalTerminal: ExternalTerminal;
@@ -104,6 +105,7 @@ export class SettingsStore {
       showFilesPanel: true,
       showActionsPanel: true,
       theme: 'dark' as AppTheme,
+      terminalTheme: 'dark' as AppTheme,
       terminalPreset: 'iterm2' as TerminalPreset,
       terminalFontSize: 13,
       externalTerminal: 'terminal' as ExternalTerminal,
@@ -141,6 +143,11 @@ export class SettingsStore {
     if (saved.showFilesPanel !== undefined) merged.showFilesPanel = saved.showFilesPanel;
     if (saved.showActionsPanel !== undefined) merged.showActionsPanel = saved.showActionsPanel;
     if (saved.theme !== undefined) merged.theme = saved.theme;
+    // Legacy fallback: if terminalTheme isn't saved yet, default it to the UI theme
+    // so existing users see no surprise color change.
+    merged.terminalTheme = saved.terminalTheme !== undefined
+      ? saved.terminalTheme
+      : (saved.theme !== undefined ? saved.theme : defaults.terminalTheme);
     if (saved.terminalPreset !== undefined) merged.terminalPreset = saved.terminalPreset;
     if (saved.terminalFontSize !== undefined) merged.terminalFontSize = saved.terminalFontSize;
     if (saved.externalTerminal !== undefined) merged.externalTerminal = saved.externalTerminal;
