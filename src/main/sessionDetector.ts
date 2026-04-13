@@ -347,11 +347,13 @@ export class SessionDetector {
           const cwd = content.cwd || '';
           if (!cwd) continue;
 
+          const liveJsonl = this.findJsonlForSession(cwd, content.sessionId);
+          const liveModel = liveJsonl ? (this.readModelFromJsonl(liveJsonl) || 'Claude') : 'Claude';
           sessions.push({
             pid,
             projectPath: cwd,
             projectName: path.basename(cwd),
-            model: 'Claude Opus 4',
+            model: liveModel,
             status: 'active',
             startTime: content.startedAt ? new Date(content.startedAt).toISOString() : stat.mtime.toISOString(),
             command: `claude (pid ${pid})`,
@@ -371,6 +373,37 @@ export class SessionDetector {
     } catch {
       return false;
     }
+  }
+
+  // Convert raw API model ID (e.g. "claude-sonnet-4-6", "claude-opus-4-5-20251101")
+  // to a human-readable display name (e.g. "Claude Sonnet 4.6").
+  static formatModelName(rawId: string): string {
+    const match = rawId.match(/claude-(opus|sonnet|haiku)-(\d+)-(\d+)/i);
+    if (!match) return 'Claude';
+    const [, tier, major, minor] = match;
+    const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
+    return `Claude ${tierName} ${major}.${minor}`;
+  }
+
+  // Read the first lines of a JSONL file to find the model ID.
+  private readModelFromJsonl(jsonlPath: string): string | undefined {
+    try {
+      const fd = fs.openSync(jsonlPath, 'r');
+      const buf = Buffer.alloc(4096);
+      const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+      fs.closeSync(fd);
+      const chunk = buf.toString('utf-8', 0, bytesRead);
+      for (const line of chunk.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.model && entry.model !== '<synthetic>') {
+            return SessionDetector.formatModelName(entry.model);
+          }
+        } catch {}
+      }
+    } catch {}
+    return undefined;
   }
 
   private detectFromStorage(): ClaudeSession[] {
@@ -424,7 +457,7 @@ export class SessionDetector {
               pid: 0,
               projectPath,
               projectName: path.basename(projectPath),
-              model: sessionInfo.model || 'Claude Sonnet 4',
+              model: sessionInfo.model || 'Claude',
               status: 'idle',
               jsonlPath: path.join(fullPath, `${sessionInfo.sessionId}.jsonl`),
               startTime: sessionInfo.modified || stat.mtime.toISOString(),
@@ -550,10 +583,8 @@ export class SessionDetector {
               if (textBlock?.text) firstPrompt = textBlock.text.length > 120 ? textBlock.text.slice(0, 120) + '...' : textBlock.text;
             }
           }
-          if (!model && entry.model) {
-            if (entry.model.includes('opus')) model = 'Claude Opus 4';
-            else if (entry.model.includes('haiku')) model = 'Claude Haiku 4';
-            else model = 'Claude Sonnet 4';
+          if (!model && entry.model && entry.model !== '<synthetic>') {
+            model = SessionDetector.formatModelName(entry.model);
           }
           if (firstPrompt && model) break;
         } catch {}
@@ -637,10 +668,8 @@ export class SessionDetector {
             }
           }
           // Extract model from assistant messages
-          if (!model && entry.model) {
-            if (entry.model.includes('opus')) model = 'Claude Opus 4';
-            else if (entry.model.includes('haiku')) model = 'Claude Haiku 4';
-            else model = 'Claude Sonnet 4';
+          if (!model && entry.model && entry.model !== '<synthetic>') {
+            model = SessionDetector.formatModelName(entry.model);
           }
           if (firstPrompt && model) break;
         } catch {}
