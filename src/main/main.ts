@@ -84,6 +84,87 @@ function setupIPC() {
     sessionMetaStore.unarchive(projectPath);
   });
 
+  // Helper: SIGTERM then escalate to SIGKILL, and remove the stale pid session file
+  const killClaudePid = async (pid: number): Promise<boolean> => {
+    if (!pid || pid <= 0) return false;
+    let killed = false;
+    try {
+      process.kill(pid, 'SIGTERM');
+      killed = true;
+      logger.add('info', 'session', `Sent SIGTERM to claude pid ${pid}`);
+    } catch (e: any) {
+      logger.add('warn', 'session', `SIGTERM failed for pid ${pid}: ${e.message}`);
+    }
+    await new Promise(r => setTimeout(r, 400));
+    try {
+      process.kill(pid, 0);
+      try {
+        process.kill(pid, 'SIGKILL');
+        killed = true;
+        logger.add('info', 'session', `Escalated to SIGKILL for pid ${pid}`);
+      } catch {}
+    } catch {
+      // ESRCH = no such process, it's gone
+    }
+    try {
+      const sessionFile = path.join(os.homedir(), '.claude', 'sessions', `${pid}.json`);
+      if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+    } catch {}
+    return killed;
+  };
+
+  ipcMain.handle('session-kill', async (_event, pid: number) => {
+    if (!pid || pid <= 0) return { ok: false, reason: 'invalid pid' };
+    const ok = await killClaudePid(pid);
+    return { ok };
+  });
+
+  // Kill every live claude session on the machine (nuclear option)
+  ipcMain.handle('kill-all-sessions', async () => {
+    const sessions = await sessionDetector.detectSessions();
+    const live = sessions.filter(s => s.pid > 0);
+    let killedCount = 0;
+    for (const s of live) {
+      const ok = await killClaudePid(s.pid);
+      if (ok) killedCount++;
+    }
+    logger.add('info', 'session', `kill-all-sessions: killed ${killedCount}/${live.length}`);
+    return { killedCount, total: live.length };
+  });
+
+  // Permanent delete: kill process + remove JSONL transcript + remove meta entry
+  ipcMain.handle('session-delete', async (_event, args: {
+    key: string;
+    pid: number;
+    projectPath: string;
+    conversationId?: string;
+  }) => {
+    if (args.pid > 0) await killClaudePid(args.pid);
+
+    let jsonlDeleted = false;
+    if (args.conversationId) {
+      const jsonlPath = sessionDetector.findJsonlForSession(args.projectPath, args.conversationId);
+      if (jsonlPath && fs.existsSync(jsonlPath)) {
+        // Safety: only delete if path is inside ~/.claude/projects/
+        const projectsRoot = path.join(os.homedir(), '.claude', 'projects');
+        if (jsonlPath.startsWith(projectsRoot)) {
+          try {
+            fs.unlinkSync(jsonlPath);
+            jsonlDeleted = true;
+          } catch (e: any) {
+            logger.add('error', 'session', `Delete jsonl failed: ${e.message}`);
+          }
+        }
+      }
+    }
+
+    sessionMetaStore.delete(args.key);
+    if (args.projectPath !== args.key) sessionMetaStore.delete(args.projectPath);
+
+    logger.add('info', 'session', `Deleted session ${args.conversationId || args.key} (jsonl=${jsonlDeleted})`);
+    return { ok: true, jsonlDeleted };
+  });
+
   // --- Logs ---
   ipcMain.handle('logs-get', async () => logger.getAll());
   ipcMain.handle('logs-clear', async () => logger.clear());

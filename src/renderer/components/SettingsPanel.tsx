@@ -598,6 +598,26 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
             return (
               <div className="logs-panel">
+                <div className="logs-maintenance">
+                  <div className="logs-maintenance-info">
+                    <span className="logs-maintenance-label">Danger zone</span>
+                    <span className="logs-maintenance-hint">Force-kill every running claude session</span>
+                  </div>
+                  <button
+                    className="settings-btn danger"
+                    onClick={async () => {
+                      const confirmed = window.confirm(
+                        'Kill every live claude session on this machine? Any unsaved work in active sessions will be lost.'
+                      );
+                      if (!confirmed) return;
+                      const result = await window.api.killAllSessions();
+                      alert(`Killed ${result.killedCount}/${result.total} claude processes`);
+                    }}
+                    title="Send SIGTERM then SIGKILL to every active claude session found on the machine"
+                  >
+                    Kill all claude sessions
+                  </button>
+                </div>
                 <div className="logs-toolbar">
                   <input
                     className="logs-filter"

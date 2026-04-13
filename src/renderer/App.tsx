@@ -328,14 +328,79 @@ export function App() {
   };
 
   const handleArchiveSession = async (key: string) => {
+    // 1. Close any in-app tabs bound to this session and destroy their ptys
+    const tabsToClose = tabs.filter(t => t.sessionKey === key);
+    for (const tab of tabsToClose) {
+      if (tab.ptyId) {
+        try { await window.api.ptyDestroy(tab.ptyId); } catch {}
+      }
+    }
+    if (tabsToClose.length > 0) {
+      const closedIds = new Set(tabsToClose.map(t => t.id));
+      setTabs(prev => prev.filter(t => !closedIds.has(t.id)));
+      setActiveTabId(prev => {
+        if (!prev || !closedIds.has(prev)) return prev;
+        const remaining = tabs.filter(t => !closedIds.has(t.id));
+        return remaining.length > 0 ? remaining[0].id : null;
+      });
+    }
+
+    // 2. Kill the underlying Claude process if we can see it running
+    const session = sessions.find(s => getSessionKey(s) === key);
+    if (session && session.pid > 0) {
+      try { await window.api.sessionKill(session.pid); } catch {}
+    }
+
+    // 3. Persist archive metadata and refresh the list
     await window.api.sessionMetaArchive(key);
     await loadSessionMeta();
+    await loadSessions();
     if (selectedSession && getSessionKey(selectedSession) === key) setSelectedSession(null);
   };
 
   const handleUnarchiveSession = async (key: string) => {
     await window.api.sessionMetaUnarchive(key);
     await loadSessionMeta();
+  };
+
+  const handleDeleteSession = async (key: string) => {
+    const session = sessions.find(s => getSessionKey(s) === key);
+    if (!session) return;
+
+    const msg = locale === 'fr'
+      ? 'Supprimer definitivement cette session ? Le fichier JSONL sera retire du disque, et claude --resume ne pourra plus la retrouver.'
+      : 'Permanently delete this session? The JSONL file will be removed from disk and claude --resume will no longer find it.';
+    if (!window.confirm(msg)) return;
+
+    // 1. Close any in-app tabs bound to this session and destroy their ptys
+    const tabsToClose = tabs.filter(t => t.sessionKey === key);
+    for (const tab of tabsToClose) {
+      if (tab.ptyId) {
+        try { await window.api.ptyDestroy(tab.ptyId); } catch {}
+      }
+    }
+    if (tabsToClose.length > 0) {
+      const closedIds = new Set(tabsToClose.map(t => t.id));
+      setTabs(prev => prev.filter(t => !closedIds.has(t.id)));
+      setActiveTabId(prev => {
+        if (!prev || !closedIds.has(prev)) return prev;
+        const remaining = tabs.filter(t => !closedIds.has(t.id));
+        return remaining.length > 0 ? remaining[0].id : null;
+      });
+    }
+
+    // 2. Main handles: kill pid + rm jsonl + rm meta
+    await window.api.sessionDelete({
+      key,
+      pid: session.pid || 0,
+      projectPath: session.projectPath,
+      conversationId: session.conversationId,
+    });
+
+    // 3. Reload
+    await loadSessionMeta();
+    await loadSessions();
+    if (selectedSession && getSessionKey(selectedSession) === key) setSelectedSession(null);
   };
 
   // Demo mode overrides
@@ -401,6 +466,7 @@ export function App() {
             onRename={handleRenameSession}
             onArchive={handleArchiveSession}
             onUnarchive={handleUnarchiveSession}
+            onDelete={handleDeleteSession}
             onNewSession={handleNewSession}
             onCreateSessionInProject={handleCreateSession}
             sortMode={sortMode}

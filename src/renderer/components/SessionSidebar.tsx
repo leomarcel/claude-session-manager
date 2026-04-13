@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ClaudeSession, SessionSortMode, LiveStatus } from '../types';
 import { Locale, t } from '../i18n';
 import { ClaudeIcon, SessionIcon } from './Icons';
@@ -12,6 +12,7 @@ interface Props {
   onRename: (key: string, name: string) => void;
   onArchive: (key: string) => void;
   onUnarchive: (key: string) => void;
+  onDelete: (key: string) => void;
   onNewSession: () => void;
   onCreateSessionInProject: (projectPath: string) => void;
   sortMode: SessionSortMode;
@@ -54,7 +55,7 @@ function getSessionDisplayName(session: ClaudeSession): string {
 
 export function SessionSidebar({
   sessions, archivedSessions, selectedSession,
-  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onNewSession, onCreateSessionInProject, sortMode, locale
+  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onNewSession, onCreateSessionInProject, sortMode, locale
 }: Props) {
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -67,6 +68,29 @@ export function SessionSidebar({
   const [filterStatuses, setFilterStatuses] = useState<Set<LiveStatus>>(new Set());
   const [groupByStatus, setGroupByStatus] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the context menu on any outside click, Escape, or scroll
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    const onScroll = () => setContextMenu(null);
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [contextMenu]);
 
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -116,7 +140,7 @@ export function SessionSidebar({
 
     return (
       <div
-        key={`${session.pid}-${session.projectPath}-${session.conversationId || ''}`}
+        key={sessionKey(session)}
         className={`session-item ${selectedSession?.projectPath === session.projectPath && selectedSession?.conversationId === session.conversationId ? 'active' : ''} ${isArchived ? 'archived' : ''}`}
         onClick={() => onSelectSession(session)}
         onContextMenu={(e) => handleContextMenu(e, session)}
@@ -442,6 +466,7 @@ export function SessionSidebar({
       {/* Context menu */}
       {contextMenu && (
         <div
+          ref={contextMenuRef}
           className="context-menu"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
@@ -458,6 +483,13 @@ export function SessionSidebar({
               &#9776; {t(locale, 'sidebar.archive')}
             </button>
           )}
+          <div className="context-menu-divider" />
+          <button
+            className="context-menu-item delete"
+            onClick={() => { onDelete(sessionKey(contextMenu.session)); closeContextMenu(); }}
+          >
+            &#128465; {t(locale, 'sidebar.deletePermanently')}
+          </button>
         </div>
       )}
     </div>

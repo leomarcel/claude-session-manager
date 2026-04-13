@@ -16,6 +16,7 @@ export const fr = {
     rename: 'Renommer',
     archive: 'Archiver',
     unarchive: 'Desarchiver',
+    deletePermanently: 'Supprimer definitivement',
     archived: 'Archives',
     archivedEmpty: 'Aucune session archivee',
     renamePlaceholder: 'Nom de la session...',

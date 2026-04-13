@@ -1613,6 +1613,58 @@
   color: var(--orange);
 }
 
+.context-menu-item.delete {
+  color: var(--red);
+}
+
+.context-menu-item.delete:hover {
+  background: rgba(255, 107, 122, 0.1);
+  color: var(--red);
+}
+
+.logs-maintenance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 107, 122, 0.06);
+  border: 1px solid rgba(255, 107, 122, 0.2);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
+.logs-maintenance-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.logs-maintenance-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--red);
+}
+
+.logs-maintenance-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.settings-btn.danger {
+  background: rgba(255, 107, 122, 0.12);
+  color: var(--red);
+  border: 1px solid rgba(255, 107, 122, 0.3);
+}
+
+.settings-btn.danger:hover {
+  background: rgba(255, 107, 122, 0.2);
+  border-color: rgba(255, 107, 122, 0.5);
+}
+
+
 /* Settings gear button */
 .settings-gear {
   background: none;

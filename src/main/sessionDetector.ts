@@ -98,7 +98,7 @@ export class SessionDetector {
     return allSessions;
   }
 
-  private findJsonlForSession(projectPath: string, conversationId?: string): string | undefined {
+  findJsonlForSession(projectPath: string, conversationId?: string): string | undefined {
     if (!conversationId) return undefined;
     const projectsDir = path.join(this.claudeConfigDir, 'projects');
     if (!fs.existsSync(projectsDir)) return undefined;

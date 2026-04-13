@@ -16,6 +16,7 @@ export const en = {
     rename: 'Rename',
     archive: 'Archive',
     unarchive: 'Unarchive',
+    deletePermanently: 'Delete permanently',
     archived: 'Archived',
     archivedEmpty: 'No archived sessions',
     renamePlaceholder: 'Session name...',

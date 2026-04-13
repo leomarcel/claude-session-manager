@@ -189,6 +189,10 @@ export interface ElectronAPI {
   sessionMetaRename: (projectPath: string, name: string) => Promise<void>;
   sessionMetaArchive: (projectPath: string) => Promise<void>;
   sessionMetaUnarchive: (projectPath: string) => Promise<void>;
+  sessionKill: (pid: number) => Promise<{ ok: boolean; reason?: string }>;
+  sessionDelete: (args: { key: string; pid: number; projectPath: string; conversationId?: string })
+    => Promise<{ ok: boolean; jsonlDeleted: boolean }>;
+  killAllSessions: () => Promise<{ killedCount: number; total: number }>;
 }
 
 declare global {
