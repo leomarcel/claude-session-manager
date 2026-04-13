@@ -386,14 +386,13 @@ export function TerminalPanel({
             <span className="tab-label">{tab.label}</span>
             {loadingTabIds.has(tab.id) && <span className="tab-loading-dot" />}
             {tabStatuses.get(tab.id) === 'busy' && !loadingTabIds.has(tab.id) && <span className="tab-busy-dot" />}
-            {visibleTabs.length > 1 && (
-              <button
-                className="tab-close"
-                onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
-              >
-                &times;
-              </button>
-            )}
+            <button
+              className={`tab-close ${tab.type === 'claude' ? 'tab-close-always' : ''}`}
+              onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
+              title={tab.type === 'claude' ? t(locale, 'terminal.disconnect') : undefined}
+            >
+              &times;
+            </button>
           </div>
         ))}
         <div className="tab-add-group">

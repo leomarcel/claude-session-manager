@@ -23,7 +23,14 @@ export type LayoutPosition = 'left' | 'right';
 export type SessionSortMode = 'default' | 'date' | 'project';
 export type TerminalPreset = 'default' | 'iterm2' | 'minimal';
 export type ExternalTerminal = 'terminal' | 'iterm2' | 'warp' | 'alacritty';
-export type AppTheme = 'dark' | 'light';
+export type AppTheme = 'dark' | 'light' | 'auto';
+
+export interface SessionFlag {
+  id: string;
+  name: string;
+  color: string;
+  order: number;
+}
 
 export interface AppSettings {
   locale: 'fr' | 'en';
@@ -44,6 +51,7 @@ export interface AppSettings {
   demoMode: boolean;
   trayEnabled: boolean;
   autoUpdate: boolean;
+  flags: SessionFlag[];
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -65,6 +73,13 @@ const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
   { id: 'worktree', type: 'builtin', visible: true, order: 2 },
   { id: 'finder', type: 'builtin', visible: true, order: 3 },
   { id: 'terminal', type: 'builtin', visible: true, order: 4 },
+];
+
+const DEFAULT_FLAGS: SessionFlag[] = [
+  { id: 'todo',    name: 'A faire',  color: '#a0a0b0', order: 0 },
+  { id: 'doing',   name: 'En cours', color: '#64b5f6', order: 1 },
+  { id: 'review',  name: 'A review', color: '#ffb044', order: 2 },
+  { id: 'done',    name: 'Fait',     color: '#50e3a0', order: 3 },
 ];
 
 export class SettingsStore {
@@ -115,6 +130,7 @@ export class SettingsStore {
       demoMode: false,
       trayEnabled: true,
       autoUpdate: true,
+      flags: DEFAULT_FLAGS.map(f => ({ ...f })),
       ides,
       quickActions: [...DEFAULT_QUICK_ACTIONS, ...ideActions],
     };
@@ -156,6 +172,7 @@ export class SettingsStore {
     if (saved.notificationsEnabled !== undefined) merged.notificationsEnabled = saved.notificationsEnabled;
     if (saved.demoMode !== undefined) merged.demoMode = saved.demoMode;
     if (saved.trayEnabled !== undefined) merged.trayEnabled = saved.trayEnabled;
+    if (Array.isArray(saved.flags) && saved.flags.length > 0) merged.flags = saved.flags;
 
     // Merge IDEs: keep saved enabled state, but update installed status
     if (saved.ides) {

@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('api', {
   sessionMetaRename: (projectPath: string, name: string) => ipcRenderer.invoke('session-meta-rename', projectPath, name),
   sessionMetaArchive: (projectPath: string) => ipcRenderer.invoke('session-meta-archive', projectPath),
   sessionMetaUnarchive: (projectPath: string) => ipcRenderer.invoke('session-meta-unarchive', projectPath),
+  sessionMetaSetFlag: (key: string, flagId: string | null) => ipcRenderer.invoke('session-meta-set-flag', key, flagId),
   sessionKill: (pid: number) => ipcRenderer.invoke('session-kill', pid),
   sessionDelete: (args: { key: string; pid: number; projectPath: string; conversationId?: string }) =>
     ipcRenderer.invoke('session-delete', args),

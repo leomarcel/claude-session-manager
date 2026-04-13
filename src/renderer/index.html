@@ -14,7 +14,9 @@
       overflow: hidden;
     }
 
-    /* Splash screen — visible before React mounts */
+    /* Splash screen — visible before React mounts.
+       Theme follows OS appearance via prefers-color-scheme since the user's
+       in-app preference isn't available until React loads (~1-2s). */
     #splash {
       position: fixed;
       inset: 0;
@@ -76,7 +78,34 @@
       color: rgba(160, 160, 176, 0.6);
       margin-top: -14px;
     }
+
+    /* Light theme follows OS appearance.
+       The renderer also adds .theme-light to <html> once settings load,
+       so the user's manual preference takes precedence after first paint. */
+    @media (prefers-color-scheme: light) {
+      html, body, #root { color: #1a1a2e; }
+      #splash { background: rgba(245, 245, 250, 0.97); }
+      .splash-spinner { border-color: rgba(0, 0, 0, 0.08); }
+      .splash-title { color: rgba(26, 26, 46, 0.85); }
+      .splash-subtitle { color: rgba(80, 80, 96, 0.6); }
+    }
+    html.theme-light, html.theme-light body, html.theme-light #root { color: #1a1a2e; }
+    html.theme-light #splash { background: rgba(245, 245, 250, 0.97); }
+    html.theme-light .splash-spinner { border-color: rgba(0, 0, 0, 0.08); }
+    html.theme-light .splash-title { color: rgba(26, 26, 46, 0.85); }
+    html.theme-light .splash-subtitle { color: rgba(80, 80, 96, 0.6); }
+    html.theme-dark #splash { background: rgba(18, 18, 22, 0.95); }
   </style>
+  <script>
+    // Apply the user's saved theme preference instantly so the splash
+    // matches their app theme. Falls back to OS appearance on first launch.
+    try {
+      var savedTheme = localStorage.getItem('app-theme');
+      if (savedTheme === 'light' || savedTheme === 'dark') {
+        document.documentElement.classList.add('theme-' + savedTheme);
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <!-- Splash screen (pure HTML, no JS dependency) -->

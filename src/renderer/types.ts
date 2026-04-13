@@ -24,6 +24,7 @@ export interface ClaudeSession {
   gitBranch?: string;
   customName?: string;
   archived?: boolean;
+  flagId?: string;
   isWorktree?: boolean;
   worktreeBranch?: string;
 }
@@ -32,6 +33,14 @@ export interface SessionMeta {
   customName?: string;
   archived?: boolean;
   archivedAt?: string;
+  flagId?: string;
+}
+
+export interface SessionFlag {
+  id: string;
+  name: string;
+  color: string;
+  order: number;
 }
 
 export interface WorktreeInfo {
@@ -86,7 +95,7 @@ export type LayoutPosition = 'left' | 'right';
 export type SessionSortMode = 'default' | 'date' | 'project';
 export type TerminalPreset = 'default' | 'iterm2' | 'minimal';
 export type ExternalTerminal = 'terminal' | 'iterm2' | 'warp' | 'alacritty';
-export type AppTheme = 'dark' | 'light';
+export type AppTheme = 'dark' | 'light' | 'auto';
 
 export interface AppSettings {
   locale: 'fr' | 'en';
@@ -107,6 +116,7 @@ export interface AppSettings {
   demoMode: boolean;
   trayEnabled: boolean;
   autoUpdate: boolean;
+  flags: SessionFlag[];
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -190,6 +200,7 @@ export interface ElectronAPI {
   sessionMetaRename: (projectPath: string, name: string) => Promise<void>;
   sessionMetaArchive: (projectPath: string) => Promise<void>;
   sessionMetaUnarchive: (projectPath: string) => Promise<void>;
+  sessionMetaSetFlag: (key: string, flagId: string | null) => Promise<void>;
   sessionKill: (pid: number) => Promise<{ ok: boolean; reason?: string }>;
   sessionDelete: (args: { key: string; pid: number; projectPath: string; conversationId?: string })
     => Promise<{ ok: boolean; jsonlDeleted: boolean }>;

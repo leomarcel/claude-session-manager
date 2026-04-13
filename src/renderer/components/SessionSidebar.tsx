@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ClaudeSession, SessionSortMode, LiveStatus } from '../types';
+import { ClaudeSession, SessionSortMode, LiveStatus, SessionFlag } from '../types';
 import { Locale, t } from '../i18n';
 import { ClaudeIcon, SessionIcon } from './Icons';
 
@@ -15,6 +15,8 @@ interface Props {
   onDelete: (key: string) => void;
   onViewHistory: (session: ClaudeSession) => void;
   onReconnect: (session: ClaudeSession) => void;
+  onSetFlag: (key: string, flagId: string | null) => void;
+  flags: SessionFlag[];
   onNewSession: () => void;
   onCreateSessionInProject: (projectPath: string) => void;
   sortMode: SessionSortMode;
@@ -57,8 +59,10 @@ function getSessionDisplayName(session: ClaudeSession): string {
 
 export function SessionSidebar({
   sessions, archivedSessions, selectedSession,
-  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onReconnect, onNewSession, onCreateSessionInProject, sortMode, locale
+  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onReconnect, onSetFlag, flags, onNewSession, onCreateSessionInProject, sortMode, locale
 }: Props) {
+  const sortedFlags = [...flags].sort((a, b) => a.order - b.order);
+  const flagById = (id?: string) => id ? sortedFlags.find(f => f.id === id) : undefined;
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; session: ClaudeSession } | null>(null);
@@ -206,6 +210,16 @@ export function SessionSidebar({
             {session.liveDetail}
           </div>
         )}
+        {(() => {
+          const flag = flagById(session.flagId);
+          if (!flag) return null;
+          return (
+            <div className="session-flag" style={{ background: flag.color + '22', color: flag.color, borderColor: flag.color + '55' }}>
+              <span className="session-flag-dot" style={{ background: flag.color }} />
+              {flag.name}
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -490,6 +504,29 @@ export function SessionSidebar({
           <button className="context-menu-item" onClick={() => startRename(contextMenu.session)}>
             &#9998; {t(locale, 'sidebar.rename')}
           </button>
+          {sortedFlags.length > 0 && (
+            <>
+              <div className="context-menu-divider" />
+              <div className="context-menu-label">{t(locale, 'sidebar.setFlag')}</div>
+              <button
+                className={`context-menu-item ${!contextMenu.session.flagId ? 'active-status' : ''}`}
+                onClick={() => { onSetFlag(sessionKey(contextMenu.session), null); closeContextMenu(); }}
+              >
+                <span className="session-flag-dot" style={{ background: 'transparent', border: '1px dashed var(--text-muted)' }} />
+                {t(locale, 'sidebar.flagNone')}
+              </button>
+              {sortedFlags.map(f => (
+                <button
+                  key={f.id}
+                  className={`context-menu-item ${contextMenu.session.flagId === f.id ? 'active-status' : ''}`}
+                  onClick={() => { onSetFlag(sessionKey(contextMenu.session), f.id); closeContextMenu(); }}
+                >
+                  <span className="session-flag-dot" style={{ background: f.color }} />
+                  {f.name}
+                </button>
+              ))}
+            </>
+          )}
           <div className="context-menu-divider" />
           {contextMenu.session.archived ? (
             <button className="context-menu-item" onClick={() => { onUnarchive(sessionKey(contextMenu.session)); closeContextMenu(); }}>

@@ -1,7 +1,7 @@
 {
   "name": "claude-session-manager",
   "productName": "Claude Session Manager",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Gestionnaire graphique de sessions Claude Code pour macOS",
   "main": "dist/main/main.js",
   "scripts": {

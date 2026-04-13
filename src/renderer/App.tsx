@@ -17,7 +17,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   sessionsPosition: 'left', sessionsSortMode: 'project',
   showFilesPanel: true, showActionsPanel: true,
   theme: 'dark', terminalTheme: 'dark', terminalPreset: 'iterm2', terminalFontSize: 13, externalTerminal: 'terminal',
-  notificationsEnabled: true, demoMode: false, trayEnabled: true, autoUpdate: true,
+  notificationsEnabled: true, demoMode: false, trayEnabled: true, autoUpdate: true, flags: [],
   terminalBgColor: '', terminalBgOpacity: 100,
   ides: [], quickActions: [],
 };
@@ -98,6 +98,30 @@ export function App() {
     return cleanup;
   }, []);
 
+  // Track OS appearance so theme: 'auto' can resolve to dark or light dynamically
+  const [osPrefersDark, setOsPrefersDark] = useState(() => {
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch { return true; }
+  });
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setOsPrefersDark(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  const resolveTheme = (pref: 'dark' | 'light' | 'auto'): 'dark' | 'light' =>
+    pref === 'auto' ? (osPrefersDark ? 'dark' : 'light') : pref;
+  const effectiveTheme = resolveTheme(settings.theme);
+  const effectiveTerminalTheme = resolveTheme(settings.terminalTheme || settings.theme);
+
+  // Persist the resolved UI theme so the splash + early paint match it on next
+  // launch (the inline script in index.html reads localStorage synchronously).
+  useEffect(() => {
+    try { localStorage.setItem('app-theme', effectiveTheme); } catch {}
+    document.documentElement.classList.toggle('theme-light', effectiveTheme === 'light');
+    document.documentElement.classList.toggle('theme-dark', effectiveTheme === 'dark');
+  }, [effectiveTheme]);
+
   // --- Sessions ---
   const loadSessions = useCallback(async () => {
     try { setSessions(await window.api.getSessions()); } catch {}
@@ -163,6 +187,18 @@ export function App() {
       );
     }
   }, [sessions, tokenUsage, isDemo]);
+
+  // Keep selectedSession in sync with the latest backend data. Without this,
+  // it's a stale snapshot from selection time so fields that change between
+  // refreshes (pid, liveStatus, liveDetail...) never update in the header.
+  useEffect(() => {
+    if (!selectedSession) return;
+    const key = getSessionKey(selectedSession);
+    const fresh = sessions.find(s => getSessionKey(s) === key);
+    if (fresh && fresh !== selectedSession) {
+      setSelectedSession(fresh);
+    }
+  }, [sessions]);
 
   // --- Git info for selected session ---
   useEffect(() => {
@@ -375,6 +411,11 @@ export function App() {
     await loadSessionMeta();
   };
 
+  const handleSetSessionFlag = async (key: string, flagId: string | null) => {
+    await window.api.sessionMetaSetFlag(key, flagId);
+    await loadSessionMeta();
+  };
+
   // Reconnect: destroy the existing Claude pty for a session and spawn a fresh
   // one in its place. Useful when the terminal got stuck or shows blank.
   const handleReconnectSession = async (session: ClaudeSession) => {
@@ -493,6 +534,7 @@ export function App() {
       ...s,
       customName: meta.customName,
       archived: meta.archived || false,
+      flagId: meta.flagId,
       liveStatus: s.liveStatus || 'disconnected',
     };
   });
@@ -523,12 +565,13 @@ export function App() {
     : [];
 
   return (
-    <div className={`app ${settings.theme === 'light' ? 'theme-light' : ''}`}>
+    <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}`}>
       <div className="titlebar">
         <img src="assets/mascotte_claude.png" alt="" width="18" height="18" className="titlebar-logo" draggable={false} />
         <span className="titlebar-text">{t(locale, 'app.title')}</span>
         <button className="settings-gear" onClick={() => setSettingsOpen(true)} title={t(locale, 'settings.title')}>
-          &#9881;
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span>{t(locale, 'settings.title')}</span>
         </button>
       </div>
 
@@ -546,6 +589,8 @@ export function App() {
             onDelete={handleDeleteSession}
             onViewHistory={handleViewHistory}
             onReconnect={handleReconnectSession}
+            onSetFlag={handleSetSessionFlag}
+            flags={settings.flags || []}
             onNewSession={handleNewSession}
             onCreateSessionInProject={handleCreateSession}
             sortMode={sortMode}
@@ -560,7 +605,7 @@ export function App() {
           isDemo={isDemo}
           terminalPreset={settings.terminalPreset}
           terminalFontSize={settings.terminalFontSize}
-          appTheme={settings.terminalTheme || settings.theme}
+          appTheme={effectiveTerminalTheme}
           terminalBgColor={settings.terminalBgColor}
           terminalBgOpacity={settings.terminalBgOpacity}
           allTabs={tabs}

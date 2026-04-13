@@ -10,7 +10,7 @@ interface Props {
   locale: Locale;
 }
 
-type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'updates' | 'logs';
+type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'flags' | 'updates' | 'logs';
 
 type UpdateCheckState =
   | { kind: 'idle' }
@@ -160,7 +160,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
         {/* Tabs */}
         <div className="settings-tabs">
-          {(['general', 'terminal', 'ides', 'actions', 'updates', 'logs'] as Tab[]).map(tab => {
+          {(['general', 'terminal', 'ides', 'actions', 'flags', 'updates', 'logs'] as Tab[]).map(tab => {
             const labelKey = tab === 'actions' ? 'quickActions' : tab === 'terminal' ? 'terminal' : tab;
             return (
               <button
@@ -220,6 +220,10 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                     <input type="radio" name="theme" checked={draft.theme === 'light'} onChange={() => updateDraft({ theme: 'light' })} />
                     {t(locale, 'settings.themeLight')}
                   </label>
+                  <label className={`settings-radio ${draft.theme === 'auto' ? 'active' : ''}`}>
+                    <input type="radio" name="theme" checked={draft.theme === 'auto'} onChange={() => updateDraft({ theme: 'auto' })} />
+                    {t(locale, 'settings.themeAuto')}
+                  </label>
                 </div>
               </div>
 
@@ -234,6 +238,10 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                   <label className={`settings-radio ${(draft.terminalTheme || draft.theme) === 'light' ? 'active' : ''}`}>
                     <input type="radio" name="terminalTheme" checked={(draft.terminalTheme || draft.theme) === 'light'} onChange={() => updateDraft({ terminalTheme: 'light' })} />
                     {t(locale, 'settings.themeLight')}
+                  </label>
+                  <label className={`settings-radio ${(draft.terminalTheme || draft.theme) === 'auto' ? 'active' : ''}`}>
+                    <input type="radio" name="terminalTheme" checked={(draft.terminalTheme || draft.theme) === 'auto'} onChange={() => updateDraft({ terminalTheme: 'auto' })} />
+                    {t(locale, 'settings.themeAuto')}
                   </label>
                 </div>
               </div>
@@ -261,20 +269,6 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                   </div>
                   <label className="toggle-switch">
                     <input type="checkbox" checked={draft.trayEnabled} onChange={() => updateDraft({ trayEnabled: !draft.trayEnabled })} />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-
-              {/* Demo mode */}
-              <div className="settings-group">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <label className="settings-label">{t(locale, 'settings.demoMode')}</label>
-                    <p className="settings-desc">{t(locale, 'settings.demoModeDesc')}</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input type="checkbox" checked={draft.demoMode} onChange={() => updateDraft({ demoMode: !draft.demoMode })} />
                     <span className="toggle-slider" />
                   </label>
                 </div>
@@ -379,6 +373,66 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                   />
                   <span className="settings-slider-value">{draft.usageRefreshInterval || 2}m</span>
                 </div>
+              </div>
+
+            </div>
+          )}
+
+          {activeTab === 'flags' && (
+            <div className="settings-section">
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.flags')}</label>
+                <p className="settings-desc">{t(locale, 'settings.flagsDesc')}</p>
+                <div className="flags-list">
+                  {(draft.flags || []).slice().sort((a, b) => a.order - b.order).map((flag) => (
+                    <div key={flag.id} className="flags-row">
+                      <input
+                        type="color"
+                        className="flags-color"
+                        value={flag.color}
+                        onChange={e => {
+                          const next = (draft.flags || []).map(f => f.id === flag.id ? { ...f, color: e.target.value } : f);
+                          updateDraft({ flags: next });
+                        }}
+                      />
+                      <input
+                        type="text"
+                        className="flags-name"
+                        value={flag.name}
+                        onChange={e => {
+                          const next = (draft.flags || []).map(f => f.id === flag.id ? { ...f, name: e.target.value } : f);
+                          updateDraft({ flags: next });
+                        }}
+                      />
+                      <button
+                        className="flags-delete"
+                        onClick={() => {
+                          const next = (draft.flags || []).filter(f => f.id !== flag.id);
+                          updateDraft({ flags: next });
+                        }}
+                        title={t(locale, 'settings.flagsDelete')}
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="settings-btn secondary flags-add"
+                  onClick={() => {
+                    const existing = draft.flags || [];
+                    const id = `flag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+                    const newFlag = {
+                      id,
+                      name: t(locale, 'settings.flagsNewName'),
+                      color: '#7c6aef',
+                      order: existing.length > 0 ? Math.max(...existing.map(f => f.order)) + 1 : 0,
+                    };
+                    updateDraft({ flags: [...existing, newFlag] });
+                  }}
+                >
+                  + {t(locale, 'settings.flagsAdd')}
+                </button>
               </div>
             </div>
           )}
@@ -613,6 +667,20 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
             return (
               <div className="logs-panel">
+                {/* Demo mode toggle (advanced setting) */}
+                <div className="settings-group" style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <label className="settings-label">{t(locale, 'settings.demoMode')}</label>
+                      <p className="settings-desc">{t(locale, 'settings.demoModeDesc')}</p>
+                    </div>
+                    <label className="toggle-switch">
+                      <input type="checkbox" checked={draft.demoMode} onChange={() => updateDraft({ demoMode: !draft.demoMode })} />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="logs-maintenance">
                   <div className="logs-maintenance-info">
                     <span className="logs-maintenance-label">Danger zone</span>

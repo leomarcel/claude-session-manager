@@ -83,6 +83,9 @@ function setupIPC() {
   ipcMain.handle('session-meta-unarchive', async (_event, projectPath: string) => {
     sessionMetaStore.unarchive(projectPath);
   });
+  ipcMain.handle('session-meta-set-flag', async (_event, key: string, flagId: string | null) => {
+    sessionMetaStore.setFlag(key, flagId);
+  });
 
   // Helper: SIGTERM then escalate to SIGKILL, and remove the stale pid session file
   const killClaudePid = async (pid: number): Promise<boolean> => {

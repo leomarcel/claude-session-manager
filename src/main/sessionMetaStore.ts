@@ -6,6 +6,7 @@ export interface SessionMeta {
   customName?: string;
   archived?: boolean;
   archivedAt?: string;
+  flagId?: string;
 }
 
 /** Persists custom session names and archive status keyed by projectPath */
@@ -62,6 +63,13 @@ export class SessionMetaStore {
       delete this.data[projectPath].archivedAt;
       this.persist();
     }
+  }
+
+  setFlag(key: string, flagId: string | null): void {
+    if (!this.data[key]) this.data[key] = {};
+    if (flagId) this.data[key].flagId = flagId;
+    else delete this.data[key].flagId;
+    this.persist();
   }
 
   delete(projectPath: string): void {

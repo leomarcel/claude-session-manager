@@ -376,7 +376,8 @@
 }
 
 .tab-item:hover .tab-close,
-.tab-item.active .tab-close {
+.tab-item.active .tab-close,
+.tab-close.tab-close-always {
   opacity: 1;
 }
 
@@ -473,6 +474,14 @@
   gap: 16px;
   background: rgba(13, 13, 18, 0.92);
   backdrop-filter: blur(8px);
+}
+
+.theme-light .terminal-loading {
+  background: rgba(248, 248, 252, 0.92);
+}
+
+.theme-light .terminal-loading-spinner {
+  border-color: rgba(0, 0, 0, 0.08);
 }
 
 .terminal-loading-mascot {
@@ -1164,6 +1173,103 @@
   max-width: 100%;
 }
 
+/* Session flag chip — same shape as .session-model */
+.session-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-flag-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Flags settings editor */
+.flags-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.flags-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.flags-color {
+  width: 28px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.flags-color::-webkit-color-swatch-wrapper { padding: 2px; }
+.flags-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+
+.flags-name {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+  font-family: inherit;
+}
+
+.flags-name:focus {
+  border-color: var(--accent);
+}
+
+.flags-delete {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.flags-delete:hover {
+  color: var(--red);
+  background: rgba(255, 107, 122, 0.1);
+}
+
+.flags-add {
+  width: 100%;
+  justify-content: center;
+}
+
 /* Context menu extras */
 .context-menu-divider {
   height: 1px;
@@ -1680,13 +1786,18 @@
 
 /* Settings gear button */
 .settings-gear {
-  background: none;
-  border: none;
-  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 16px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
   transition: all var(--transition);
   -webkit-app-region: no-drag;
   line-height: 1;
@@ -1695,6 +1806,7 @@
 .settings-gear:hover {
   color: var(--accent-bright);
   background: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 /* Settings modal */
@@ -1710,8 +1822,10 @@
 }
 
 .settings-modal {
-  width: 640px;
-  max-height: 80vh;
+  width: 920px;
+  max-width: 92vw;
+  height: 88vh;
+  max-height: 88vh;
   background: var(--bg-secondary);
   border: 1px solid var(--border-light);
   border-radius: 14px;
