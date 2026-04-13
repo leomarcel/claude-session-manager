@@ -314,13 +314,22 @@ export function App() {
   };
 
   const handleCloseTab = (tabId: string) => {
+    const closingTab = tabs.find(t => t.id === tabId);
     const remaining = tabs.filter(t => t.id !== tabId);
     setTabs(remaining);
     setActiveTabId(prev => {
       if (prev !== tabId) return prev;
-      if (remaining.length === 0) return null;
-      const idx = tabs.findIndex(t => t.id === tabId);
-      return remaining[Math.min(idx, remaining.length - 1)].id;
+      // Pick the next tab of the SAME session (so we never accidentally jump
+      // into a tab that belongs to another session and create a desync between
+      // selectedSession and activeTabId).
+      if (closingTab) {
+        const sameSessionTabs = remaining.filter(t => t.sessionKey === closingTab.sessionKey);
+        if (sameSessionTabs.length > 0) {
+          const sameIdx = tabs.filter(t => t.sessionKey === closingTab.sessionKey).findIndex(t => t.id === tabId);
+          return sameSessionTabs[Math.min(sameIdx, sameSessionTabs.length - 1)].id;
+        }
+      }
+      return null;
     });
   };
 
@@ -394,34 +403,44 @@ export function App() {
   };
 
   const handleArchiveSession = async (key: string) => {
-    // 1. Close any in-app tabs bound to this session and destroy their ptys
+    // Snapshot before mutations
+    const session = sessions.find(s => getSessionKey(s) === key);
     const tabsToClose = tabs.filter(t => t.sessionKey === key);
+    const closedIds = new Set(tabsToClose.map(t => t.id));
+    const isCurrentlySelected = !!selectedSession && getSessionKey(selectedSession) === key;
+
+    // 1. Reset UI state synchronously up front so React never renders an
+    //    intermediate state with selectedSession pointing at a session whose
+    //    tabs have already been removed (same crash root cause as delete).
+    if (isCurrentlySelected) setSelectedSession(null);
+    if (closedIds.size > 0) {
+      setTabs(prev => prev.filter(t => !closedIds.has(t.id)));
+      setActiveTabId(prev => (prev && closedIds.has(prev) ? null : prev));
+    }
+
+    // 2. Destroy the ptys (best-effort)
     for (const tab of tabsToClose) {
       if (tab.ptyId) {
         try { await window.api.ptyDestroy(tab.ptyId); } catch {}
       }
     }
-    if (tabsToClose.length > 0) {
-      const closedIds = new Set(tabsToClose.map(t => t.id));
-      setTabs(prev => prev.filter(t => !closedIds.has(t.id)));
-      setActiveTabId(prev => {
-        if (!prev || !closedIds.has(prev)) return prev;
-        const remaining = tabs.filter(t => !closedIds.has(t.id));
-        return remaining.length > 0 ? remaining[0].id : null;
-      });
-    }
 
-    // 2. Kill the underlying Claude process if we can see it running
-    const session = sessions.find(s => getSessionKey(s) === key);
+    // 3. Kill the underlying Claude process if we can see it running
     if (session && session.pid > 0) {
       try { await window.api.sessionKill(session.pid); } catch {}
     }
 
-    // 3. Persist archive metadata and refresh the list
-    await window.api.sessionMetaArchive(key);
-    await loadSessionMeta();
-    await loadSessions();
-    if (selectedSession && getSessionKey(selectedSession) === key) setSelectedSession(null);
+    // 4. Persist archive metadata and refresh the list
+    try {
+      await window.api.sessionMetaArchive(key);
+      await loadSessionMeta();
+      await loadSessions();
+    } catch (e: any) {
+      toast.show(`Archive failed: ${e?.message || 'unknown error'}`, 'error');
+      return;
+    }
+
+    toast.show(locale === 'fr' ? 'Session archivee' : 'Session archived', 'success');
   };
 
   const handleUnarchiveSession = async (key: string) => {
