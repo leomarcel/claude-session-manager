@@ -25,6 +25,7 @@ export interface ClaudeSession {
   customName?: string;
   archived?: boolean;
   flagId?: string;
+  pinned?: boolean;
   isWorktree?: boolean;
   worktreeBranch?: string;
 }
@@ -34,6 +35,7 @@ export interface SessionMeta {
   archived?: boolean;
   archivedAt?: string;
   flagId?: string;
+  pinned?: boolean;
 }
 
 export interface SessionFlag {
@@ -41,6 +43,49 @@ export interface SessionFlag {
   name: string;
   color: string;
   order: number;
+}
+
+export interface ShortcutBinding {
+  id: string;
+  accelerator: string;
+}
+
+export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
+  { id: 'session-1',  accelerator: 'Cmd+1' },
+  { id: 'session-2',  accelerator: 'Cmd+2' },
+  { id: 'session-3',  accelerator: 'Cmd+3' },
+  { id: 'session-4',  accelerator: 'Cmd+4' },
+  { id: 'session-5',  accelerator: 'Cmd+5' },
+  { id: 'new-shell',  accelerator: 'Cmd+T' },
+  { id: 'new-claude', accelerator: 'Cmd+Shift+T' },
+  { id: 'close-tab',  accelerator: 'Cmd+W' },
+  { id: 'split-view', accelerator: 'Cmd+\\' },
+];
+
+export type ClaudeConfigScope = 'global' | 'global-local' | 'project' | 'project-local';
+
+export interface PromptSnippet {
+  id: string;
+  title: string;
+  content: string;
+}
+
+export interface ConversationMatch {
+  conversationId: string;
+  projectPath: string;
+  snippet: string;
+  matchCount: number;
+}
+
+export interface UsageDayBucket {
+  day: string;          // YYYY-MM-DD
+  messages: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cost: number;         // USD, computed from token counts × current Anthropic pricing
+  tools: number;
+  sessions: number;
 }
 
 export interface WorktreeInfo {
@@ -112,11 +157,13 @@ export interface AppSettings {
   externalTerminal: ExternalTerminal;
   terminalBgColor: string;
   terminalBgOpacity: number;
+  terminalBgImage: string;
   notificationsEnabled: boolean;
   demoMode: boolean;
   trayEnabled: boolean;
   autoUpdate: boolean;
   flags: SessionFlag[];
+  shortcuts: ShortcutBinding[];
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -128,7 +175,7 @@ export interface TerminalTab {
   projectPath: string;
   sessionKey: string;         // Unique key per session (conversationId or generated)
   label: string;
-  type: 'claude' | 'shell' | 'diff' | 'history' | 'notes';
+  type: 'claude' | 'shell' | 'diff' | 'history' | 'notes' | 'claudemd' | 'usage' | 'claude-config';
   initialized?: boolean;
   diffFilePath?: string;     // For diff tabs: the file to diff
   command: string;           // Startup command (for restore)
@@ -181,13 +228,32 @@ export interface ElectronAPI {
   settingsSave: (settings: Partial<AppSettings>) => Promise<AppSettings>;
   settingsDetectIDEs: () => Promise<IDEInfo[]>;
   settingsReset: () => Promise<AppSettings>;
-  onUpdateAvailable: (callback: (info: { version: string }) => void) => () => void;
   onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
   updaterInstall: () => Promise<void>;
   updaterCheck: () => Promise<{ currentVersion?: string; updateAvailable?: boolean; latestVersion?: string; error?: string }>;
   getAppVersion: () => Promise<string>;
   notesLoad: (projectPath: string) => Promise<string>;
   notesSave: (projectPath: string, content: string) => Promise<void>;
+  claudeConfigLoad: (scope: ClaudeConfigScope, projectPath?: string) =>
+    Promise<{ exists: boolean; content: string; path: string; error?: string }>;
+  claudeConfigSave: (scope: ClaudeConfigScope, content: string, projectPath?: string) =>
+    Promise<{ ok: boolean; error?: string }>;
+  claudeMdLoad: (projectPath: string) =>
+    Promise<{ exists: boolean; content: string; path: string; error?: string }>;
+  claudeMdSave: (projectPath: string, content: string) =>
+    Promise<{ ok: boolean; error?: string }>;
+  sessionExportMarkdown: (projectPath: string, conversationId: string) =>
+    Promise<{ ok: boolean; markdown?: string; error?: string }>;
+  usageHistory: (projectPath: string, days?: number) =>
+    Promise<{ ok: boolean; series?: UsageDayBucket[]; error?: string }>;
+  searchConversations: (query: string) =>
+    Promise<{ ok: boolean; matches?: ConversationMatch[]; error?: string }>;
+  snippetsLoad: () => Promise<PromptSnippet[]>;
+  snippetsSave: (snippets: PromptSnippet[]) => Promise<{ ok: boolean; error?: string }>;
+  dialogSaveFile: (defaultName: string, content: string) =>
+    Promise<{ ok: boolean; path?: string; error?: string }>;
+  dialogSelectImage: () => Promise<string | null>;
+  openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
   onShortcut: (callback: (action: string) => void) => () => void;
   onOpenSettings: (callback: () => void) => () => void;
   updateTraySessions: (sessions: { projectName: string; projectPath: string; status: string }[], usage?: string) => void;
@@ -201,6 +267,7 @@ export interface ElectronAPI {
   sessionMetaArchive: (projectPath: string) => Promise<void>;
   sessionMetaUnarchive: (projectPath: string) => Promise<void>;
   sessionMetaSetFlag: (key: string, flagId: string | null) => Promise<void>;
+  sessionMetaSetPinned: (key: string, pinned: boolean) => Promise<void>;
   sessionKill: (pid: number) => Promise<{ ok: boolean; reason?: string }>;
   sessionDelete: (args: { key: string; pid: number; projectPath: string; conversationId?: string })
     => Promise<{ ok: boolean; jsonlDeleted: boolean }>;

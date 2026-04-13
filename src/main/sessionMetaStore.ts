@@ -7,6 +7,7 @@ export interface SessionMeta {
   archived?: boolean;
   archivedAt?: string;
   flagId?: string;
+  pinned?: boolean;
 }
 
 /** Persists custom session names and archive status keyed by projectPath */
@@ -69,6 +70,13 @@ export class SessionMetaStore {
     if (!this.data[key]) this.data[key] = {};
     if (flagId) this.data[key].flagId = flagId;
     else delete this.data[key].flagId;
+    this.persist();
+  }
+
+  setPinned(key: string, pinned: boolean): void {
+    if (!this.data[key]) this.data[key] = {};
+    if (pinned) this.data[key].pinned = true;
+    else delete this.data[key].pinned;
     this.persist();
   }
 

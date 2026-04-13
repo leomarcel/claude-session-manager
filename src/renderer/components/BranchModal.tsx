@@ -14,16 +14,22 @@ export function BranchModal({ isOpen, onClose, projectPath, locale }: Props) {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState('');
   const [useWorktree, setUseWorktree] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
     setLoading(true);
     setError('');
+    setSearch('');
     window.api.getBranches(projectPath).then(b => {
       setBranches(b);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [isOpen, projectPath]);
+
+  const filteredBranches = search.trim()
+    ? branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase().trim()))
+    : branches;
 
   if (!isOpen) return null;
 
@@ -61,11 +67,27 @@ export function BranchModal({ isOpen, onClose, projectPath, locale }: Props) {
         <div className="new-session-content">
           {/* Worktree toggle */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Create worktree instead of switching</span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t(locale, 'branch.useWorktree')}</span>
             <label className="toggle-switch small">
               <input type="checkbox" checked={useWorktree} onChange={() => setUseWorktree(p => !p)} />
               <span className="toggle-slider" />
             </label>
+          </div>
+
+          {/* Search */}
+          <div className="branch-search">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input
+              className="branch-search-input"
+              type="text"
+              placeholder={t(locale, 'sidebar.search')}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+            {search && (
+              <button className="branch-search-clear" onClick={() => setSearch('')}>&times;</button>
+            )}
           </div>
 
           {error && (
@@ -76,9 +98,11 @@ export function BranchModal({ isOpen, onClose, projectPath, locale }: Props) {
 
           {loading ? (
             <div className="logs-empty">{t(locale, 'status.loading')}</div>
+          ) : filteredBranches.length === 0 ? (
+            <div className="logs-empty">No matching branch</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 300, overflowY: 'auto' }}>
-              {branches.map(b => (
+              {filteredBranches.map(b => (
                 <button
                   key={b.name}
                   className={`new-session-project ${b.current ? 'selected' : ''}`}

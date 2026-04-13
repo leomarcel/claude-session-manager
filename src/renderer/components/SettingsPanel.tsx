@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AppSettings, IDEInfo, QuickAction, LogEntry } from '../types';
+import { AppSettings, IDEInfo, QuickAction, LogEntry, ClaudeConfigScope, PromptSnippet, ShortcutBinding, DEFAULT_SHORTCUTS } from '../types';
 import { t, Locale } from '../i18n';
+import { useToast } from './Toast';
+import { ClaudeConfigStructuredEditor } from './ClaudeConfigStructuredEditor';
 
 interface Props {
   isOpen: boolean;
@@ -8,9 +10,10 @@ interface Props {
   settings: AppSettings;
   onSave: (settings: Partial<AppSettings>) => void;
   locale: Locale;
+  selectedProjectPath?: string;
 }
 
-type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'flags' | 'updates' | 'logs';
+type Tab = 'general' | 'terminal' | 'ides' | 'actions' | 'flags' | 'claudeCode' | 'snippets' | 'shortcuts' | 'updates' | 'logs';
 
 type UpdateCheckState =
   | { kind: 'idle' }
@@ -19,7 +22,8 @@ type UpdateCheckState =
   | { kind: 'upToDate' }
   | { kind: 'error'; message: string };
 
-export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Props) {
+export function SettingsPanel({ isOpen, onClose, settings, onSave, locale, selectedProjectPath }: Props) {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [ides, setIDEs] = useState<IDEInfo[]>(settings.ides);
@@ -29,6 +33,31 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
   const [appVersion, setAppVersion] = useState<string>('');
   const [updateState, setUpdateState] = useState<UpdateCheckState>({ kind: 'idle' });
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+
+  // Claude Code config tab state
+  const [ccScope, setCcScope] = useState<ClaudeConfigScope>('global');
+  const [ccContent, setCcContent] = useState<string>('');
+  const [ccPath, setCcPath] = useState<string>('');
+  const [ccLoading, setCcLoading] = useState<boolean>(false);
+  const [ccDirty, setCcDirty] = useState<boolean>(false);
+  const [ccStatus, setCcStatus] = useState<{ kind: 'idle' | 'saved' | 'error'; message?: string }>({ kind: 'idle' });
+  const [ccView, setCcView] = useState<'structured' | 'raw'>('structured');
+
+  // Helpers to mutate the parsed config object
+  const parseCcConfig = (): any => {
+    try { return JSON.parse(ccContent || '{}'); } catch { return null; }
+  };
+  const writeCcConfig = (obj: any) => {
+    setCcContent(JSON.stringify(obj, null, 2));
+    setCcDirty(true);
+    setCcStatus({ kind: 'idle' });
+  };
+
+  // Prompt snippets tab state
+  const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
+
+  // Shortcuts recording state
+  const [recordingShortcutId, setRecordingShortcutId] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(settings);
@@ -53,6 +82,54 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
       window.api.getAppVersion().then(setAppVersion).catch(() => setAppVersion('?'));
     }
   }, [isOpen]);
+
+  // Load Claude Code config whenever the scope or the selected project changes
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'claudeCode') return;
+    setCcLoading(true);
+    setCcStatus({ kind: 'idle' });
+    setCcDirty(false);
+    const projectArg = (ccScope === 'project' || ccScope === 'project-local') ? selectedProjectPath : undefined;
+    window.api.claudeConfigLoad(ccScope, projectArg).then(res => {
+      setCcContent(res.exists ? res.content : '{}');
+      setCcPath(res.path);
+      setCcLoading(false);
+    }).catch(() => setCcLoading(false));
+  }, [isOpen, activeTab, ccScope, selectedProjectPath]);
+
+  const handleCcSave = async () => {
+    const projectArg = (ccScope === 'project' || ccScope === 'project-local') ? selectedProjectPath : undefined;
+    const res = await window.api.claudeConfigSave(ccScope, ccContent, projectArg);
+    if (res.ok) {
+      setCcDirty(false);
+      setCcStatus({ kind: 'saved' });
+      setTimeout(() => setCcStatus({ kind: 'idle' }), 2500);
+    } else {
+      setCcStatus({ kind: 'error', message: res.error || 'Save failed' });
+    }
+  };
+
+  const handleCcFormat = () => {
+    try {
+      const parsed = JSON.parse(ccContent);
+      setCcContent(JSON.stringify(parsed, null, 2));
+      setCcDirty(true);
+      setCcStatus({ kind: 'idle' });
+    } catch (e: any) {
+      setCcStatus({ kind: 'error', message: `Invalid JSON: ${e.message}` });
+    }
+  };
+
+  // Load snippets when tab opens
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'snippets') return;
+    window.api.snippetsLoad().then(setSnippets).catch(() => setSnippets([]));
+  }, [isOpen, activeTab]);
+
+  const persistSnippets = (next: PromptSnippet[]) => {
+    setSnippets(next);
+    window.api.snippetsSave(next).catch(() => {});
+  };
 
   const handleCheckForUpdates = async () => {
     setUpdateState({ kind: 'checking' });
@@ -150,7 +227,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
   };
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
+    <div className="settings-fullscreen-overlay" onClick={onClose}>
       <div className="settings-modal" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="settings-header">
@@ -160,7 +237,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
 
         {/* Tabs */}
         <div className="settings-tabs">
-          {(['general', 'terminal', 'ides', 'actions', 'flags', 'updates', 'logs'] as Tab[]).map(tab => {
+          {(['general', 'terminal', 'ides', 'actions', 'flags', 'claudeCode', 'snippets', 'shortcuts', 'updates', 'logs'] as Tab[]).map(tab => {
             const labelKey = tab === 'actions' ? 'quickActions' : tab === 'terminal' ? 'terminal' : tab;
             return (
               <button
@@ -485,6 +562,37 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                 </div>
               </div>
 
+              {/* Background image */}
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.terminalBgImage')}</label>
+                <p className="settings-desc">{t(locale, 'settings.terminalBgImageDesc')}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                  <button
+                    className="settings-btn secondary"
+                    onClick={async () => {
+                      const file = await window.api.dialogSelectImage();
+                      if (file) updateDraft({ terminalBgImage: file });
+                    }}
+                  >
+                    {t(locale, 'settings.terminalBgImagePick')}
+                  </button>
+                  {draft.terminalBgImage && (
+                    <button
+                      className="settings-btn secondary"
+                      style={{ padding: '4px 10px', fontSize: 11 }}
+                      onClick={() => updateDraft({ terminalBgImage: '' })}
+                    >
+                      {t(locale, 'settings.terminalBgImageClear')}
+                    </button>
+                  )}
+                </div>
+                {draft.terminalBgImage && (
+                  <p className="settings-desc" style={{ marginTop: 6, fontFamily: 'ui-monospace, monospace', fontSize: 10, wordBreak: 'break-all' }}>
+                    {draft.terminalBgImage}
+                  </p>
+                )}
+              </div>
+
               {/* External terminal */}
               <div className="settings-group">
                 <label className="settings-label">{t(locale, 'settings.externalTerminal')}</label>
@@ -582,6 +690,222 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
               </div>
             </div>
           )}
+
+          {activeTab === 'claudeCode' && (
+            <div className="settings-section">
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.claudeCodeScope')}</label>
+                <p className="settings-desc">{t(locale, 'settings.claudeCodeDesc')}</p>
+                <div className="settings-radio-group">
+                  {(['global', 'global-local'] as ClaudeConfigScope[]).map(scope => (
+                    <label key={scope} className={`settings-radio ${ccScope === scope ? 'active' : ''}`}>
+                      <input
+                        type="radio"
+                        name="cc-scope"
+                        checked={ccScope === scope}
+                        onChange={() => setCcScope(scope)}
+                      />
+                      {scope === 'global' ? '~/.claude/settings.json' : '~/.claude/settings.local.json'}
+                    </label>
+                  ))}
+                </div>
+                <p className="settings-desc" style={{ marginTop: 6, fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>
+                  {ccPath}
+                </p>
+                <p className="settings-desc" style={{ marginTop: 4 }}>
+                  {t(locale, 'settings.claudeCodeProjectHint')}
+                </p>
+              </div>
+
+              <div className="settings-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <label className="settings-label" style={{ margin: 0 }}>
+                    {ccView === 'structured' ? t(locale, 'settings.claudeCodeStructured') : t(locale, 'settings.claudeCodeJson')}
+                  </label>
+                  <div className="settings-radio-group" style={{ margin: 0 }}>
+                    <label className={`settings-radio ${ccView === 'structured' ? 'active' : ''}`} style={{ padding: '5px 12px' }}>
+                      <input type="radio" name="cc-view" checked={ccView === 'structured'} onChange={() => setCcView('structured')} />
+                      {t(locale, 'settings.claudeCodeViewStructured')}
+                    </label>
+                    <label className={`settings-radio ${ccView === 'raw' ? 'active' : ''}`} style={{ padding: '5px 12px' }}>
+                      <input type="radio" name="cc-view" checked={ccView === 'raw'} onChange={() => setCcView('raw')} />
+                      {t(locale, 'settings.claudeCodeViewRaw')}
+                    </label>
+                  </div>
+                </div>
+
+                {ccView === 'raw' && (
+                  <textarea
+                    className="claude-config-editor"
+                    value={ccContent}
+                    spellCheck={false}
+                    onChange={e => { setCcContent(e.target.value); setCcDirty(true); setCcStatus({ kind: 'idle' }); }}
+                    placeholder={ccLoading ? 'Loading...' : '{}'}
+                  />
+                )}
+
+                {ccView === 'structured' && (() => {
+                  const cfg = parseCcConfig();
+                  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+                    return (
+                      <div className="claude-config-status error" style={{ padding: 12 }}>
+                        {t(locale, 'settings.claudeCodeInvalidJson')}
+                      </div>
+                    );
+                  }
+                  return <ClaudeConfigStructuredEditor cfg={cfg} onChange={writeCcConfig} locale={locale} />;
+                })()}
+
+                <div className="claude-config-actions">
+                  <button
+                    className="settings-btn primary"
+                    onClick={handleCcSave}
+                    disabled={!ccDirty || ccLoading}
+                  >
+                    {t(locale, 'settings.save')}
+                  </button>
+                  {ccView === 'raw' && (
+                    <button className="settings-btn secondary" onClick={handleCcFormat} disabled={ccLoading}>
+                      {t(locale, 'settings.claudeCodeFormat')}
+                    </button>
+                  )}
+                  {ccStatus.kind === 'saved' && (
+                    <span className="claude-config-status success">✓ {t(locale, 'settings.claudeCodeSaved')}</span>
+                  )}
+                  {ccStatus.kind === 'error' && (
+                    <span className="claude-config-status error">{ccStatus.message}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'snippets' && (
+            <div className="settings-section">
+              <div className="settings-group">
+                <label className="settings-label">{t(locale, 'settings.snippets')}</label>
+                <p className="settings-desc">{t(locale, 'settings.snippetsDesc')}</p>
+                <div className="snippets-list">
+                  {snippets.length === 0 && (
+                    <div className="snippets-empty">{t(locale, 'settings.snippetsEmpty')}</div>
+                  )}
+                  {snippets.map(snip => (
+                    <div key={snip.id} className="snippets-row">
+                      <input
+                        type="text"
+                        className="snippets-title"
+                        value={snip.title}
+                        placeholder={t(locale, 'settings.snippetsTitlePlaceholder')}
+                        onChange={e => persistSnippets(snippets.map(s => s.id === snip.id ? { ...s, title: e.target.value } : s))}
+                      />
+                      <textarea
+                        className="snippets-content"
+                        value={snip.content}
+                        placeholder={t(locale, 'settings.snippetsContentPlaceholder')}
+                        onChange={e => persistSnippets(snippets.map(s => s.id === snip.id ? { ...s, content: e.target.value } : s))}
+                        rows={3}
+                      />
+                      <button
+                        className="snippets-delete"
+                        onClick={() => persistSnippets(snippets.filter(s => s.id !== snip.id))}
+                        title={t(locale, 'settings.snippetsDelete')}
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="settings-btn secondary snippets-add"
+                  onClick={() => {
+                    const id = `snip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+                    persistSnippets([...snippets, { id, title: '', content: '' }]);
+                  }}
+                >
+                  + {t(locale, 'settings.snippetsAdd')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'shortcuts' && (() => {
+            const currentShortcuts: ShortcutBinding[] = (draft.shortcuts && draft.shortcuts.length > 0)
+              ? draft.shortcuts
+              : DEFAULT_SHORTCUTS.map(s => ({ ...s }));
+
+            const setShortcut = (id: string, accelerator: string) => {
+              const next = currentShortcuts.map(s => s.id === id ? { ...s, accelerator } : s);
+              updateDraft({ shortcuts: next });
+            };
+
+            const formatKeyEvent = (e: React.KeyboardEvent): string | null => {
+              const parts: string[] = [];
+              if (e.metaKey) parts.push('Cmd');
+              if (e.ctrlKey) parts.push('Ctrl');
+              if (e.altKey) parts.push('Alt');
+              if (e.shiftKey) parts.push('Shift');
+              const key = e.key;
+              // Ignore standalone modifier keys
+              if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;
+              let keyName = key;
+              if (key === ' ') keyName = 'Space';
+              else if (key === 'ArrowUp') keyName = 'Up';
+              else if (key === 'ArrowDown') keyName = 'Down';
+              else if (key === 'ArrowLeft') keyName = 'Left';
+              else if (key === 'ArrowRight') keyName = 'Right';
+              else if (key.length === 1) keyName = key.toUpperCase();
+              parts.push(keyName);
+              return parts.join('+');
+            };
+
+            const onRecordKey = (e: React.KeyboardEvent, id: string) => {
+              e.preventDefault();
+              if (e.key === 'Escape') { setRecordingShortcutId(null); return; }
+              if (e.key === 'Backspace' || e.key === 'Delete') {
+                setShortcut(id, '');
+                setRecordingShortcutId(null);
+                return;
+              }
+              const formatted = formatKeyEvent(e);
+              if (!formatted) return;
+              setShortcut(id, formatted);
+              setRecordingShortcutId(null);
+            };
+
+            return (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">{t(locale, 'settings.shortcuts')}</label>
+                  <p className="settings-desc">{t(locale, 'settings.shortcutsDesc')}</p>
+                  <div className="shortcuts-list">
+                    {currentShortcuts.map(s => (
+                      <div key={s.id} className="shortcuts-row">
+                        <span className="shortcuts-action">{t(locale, `settings.shortcut_${s.id.replace(/-/g, '_')}`)}</span>
+                        <button
+                          type="button"
+                          className={`shortcuts-chip ${recordingShortcutId === s.id ? 'recording' : ''} ${!s.accelerator ? 'empty' : ''}`}
+                          onClick={() => setRecordingShortcutId(s.id)}
+                          onKeyDown={(e) => recordingShortcutId === s.id ? onRecordKey(e, s.id) : undefined}
+                          onBlur={() => setRecordingShortcutId(prev => prev === s.id ? null : prev)}
+                        >
+                          {recordingShortcutId === s.id
+                            ? t(locale, 'settings.shortcutsRecording')
+                            : (s.accelerator || t(locale, 'settings.shortcutsEmpty'))}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className="settings-btn secondary"
+                    style={{ marginTop: 12 }}
+                    onClick={() => updateDraft({ shortcuts: DEFAULT_SHORTCUTS.map(s => ({ ...s })) })}
+                  >
+                    {t(locale, 'settings.shortcutsReset')}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {activeTab === 'updates' && (
             <div className="settings-section">
@@ -689,16 +1013,18 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, locale }: Pro
                   <button
                     className="settings-btn danger"
                     onClick={async () => {
-                      const confirmed = window.confirm(
-                        'Kill every live claude session on this machine? Any unsaved work in active sessions will be lost.'
-                      );
-                      if (!confirmed) return;
+                      if (!window.confirm(t(locale, 'settings.killAllConfirm'))) return;
                       const result = await window.api.killAllSessions();
-                      alert(`Killed ${result.killedCount}/${result.total} claude processes`);
+                      toast.show(
+                        t(locale, 'settings.killAllResult')
+                          .replace('{killed}', String(result.killedCount))
+                          .replace('{total}', String(result.total)),
+                        result.killedCount > 0 ? 'success' : 'info'
+                      );
                     }}
-                    title="Send SIGTERM then SIGKILL to every active claude session found on the machine"
+                    title={t(locale, 'settings.killAllHint')}
                   >
-                    Kill all claude sessions
+                    {t(locale, 'settings.killAll')}
                   </button>
                 </div>
                 <div className="logs-toolbar">

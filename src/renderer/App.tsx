@@ -11,14 +11,17 @@ import { BranchModal } from './components/BranchModal';
 import { UpdateToast } from './components/UpdateToast';
 import { SettingsPanel } from './components/SettingsPanel';
 import { NewSessionModal } from './components/NewSessionModal';
+import { AboutDialog } from './components/AboutDialog';
+import { CommandPalette } from './components/CommandPalette';
+import { useToast } from './components/Toast';
 
 const DEFAULT_SETTINGS: AppSettings = {
   locale: 'en', refreshInterval: 15, usageRefreshInterval: 5,
   sessionsPosition: 'left', sessionsSortMode: 'project',
   showFilesPanel: true, showActionsPanel: true,
   theme: 'dark', terminalTheme: 'dark', terminalPreset: 'iterm2', terminalFontSize: 13, externalTerminal: 'terminal',
-  notificationsEnabled: true, demoMode: false, trayEnabled: true, autoUpdate: true, flags: [],
-  terminalBgColor: '', terminalBgOpacity: 100,
+  notificationsEnabled: true, demoMode: false, trayEnabled: true, autoUpdate: true, flags: [], shortcuts: [],
+  terminalBgColor: '', terminalBgOpacity: 100, terminalBgImage: '',
   ides: [], quickActions: [],
 };
 
@@ -36,6 +39,7 @@ function hideSplash() {
 }
 
 export function App() {
+  const toast = useToast();
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ClaudeSession | null>(null);
   const [modifiedFiles, setModifiedFiles] = useState<ModifiedFile[]>([]);
@@ -49,6 +53,8 @@ export function App() {
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -96,6 +102,18 @@ export function App() {
   useEffect(() => {
     const cleanup = window.api.onUpdateDownloaded((info) => setUpdateReady(info));
     return cleanup;
+  }, []);
+
+  // Cmd+K opens the command palette
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen(p => !p);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // Track OS appearance so theme: 'auto' can resolve to dark or light dynamically
@@ -416,6 +434,11 @@ export function App() {
     await loadSessionMeta();
   };
 
+  const handleTogglePin = async (key: string, pinned: boolean) => {
+    await window.api.sessionMetaSetPinned(key, pinned);
+    await loadSessionMeta();
+  };
+
   // Reconnect: destroy the existing Claude pty for a session and spawn a fresh
   // one in its place. Useful when the terminal got stuck or shows blank.
   const handleReconnectSession = async (session: ClaudeSession) => {
@@ -452,6 +475,20 @@ export function App() {
     if (wasActive || replacements.length > 0) {
       setActiveTabId(replacements[0].id);
     }
+  };
+
+  const handleExportSession = async (session: ClaudeSession) => {
+    if (!session.conversationId) return;
+    const res = await window.api.sessionExportMarkdown(session.projectPath, session.conversationId);
+    if (!res.ok || !res.markdown) {
+      toast.show(`Export failed: ${res.error || 'unknown'}`, 'error');
+      return;
+    }
+    const safeName = (session.customName || session.projectName || 'session')
+      .replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 40);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const saved = await window.api.dialogSaveFile(`claude-${safeName}-${stamp}.md`, res.markdown);
+    if (saved.ok && saved.path) toast.show(`Exported to ${saved.path}`, 'success');
   };
 
   // Open the history tab for a session WITHOUT spawning a Claude pty
@@ -535,11 +572,12 @@ export function App() {
       customName: meta.customName,
       archived: meta.archived || false,
       flagId: meta.flagId,
+      pinned: meta.pinned || false,
       liveStatus: s.liveStatus || 'disconnected',
     };
   });
 
-  // Sort sessions based on settings
+  // Sort sessions based on settings — pinned always come first
   const sortMode = settings.sessionsSortMode || 'default';
   const sortSessions = (list: ClaudeSession[]) => {
     const sorted = [...list];
@@ -552,6 +590,12 @@ export function App() {
         return dirA.localeCompare(dirB);
       });
     }
+    // Pinned-first stable sort
+    sorted.sort((a, b) => {
+      const ap = a.pinned ? 1 : 0;
+      const bp = b.pinned ? 1 : 0;
+      return bp - ap;
+    });
     return sorted;
   };
 
@@ -567,7 +611,17 @@ export function App() {
   return (
     <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}`}>
       <div className="titlebar">
-        <img src="assets/mascotte_claude.png" alt="" width="18" height="18" className="titlebar-logo" draggable={false} />
+        <img
+          src="assets/mascotte_claude.png"
+          alt=""
+          width="18"
+          height="18"
+          className="titlebar-logo"
+          draggable={false}
+          onClick={() => setAboutOpen(true)}
+          style={{ cursor: 'pointer' }}
+          title={t(locale, 'about.title')}
+        />
         <span className="titlebar-text">{t(locale, 'app.title')}</span>
         <button className="settings-gear" onClick={() => setSettingsOpen(true)} title={t(locale, 'settings.title')}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -590,6 +644,8 @@ export function App() {
             onViewHistory={handleViewHistory}
             onReconnect={handleReconnectSession}
             onSetFlag={handleSetSessionFlag}
+            onTogglePin={handleTogglePin}
+            onExportMarkdown={handleExportSession}
             flags={settings.flags || []}
             onNewSession={handleNewSession}
             onCreateSessionInProject={handleCreateSession}
@@ -608,6 +664,7 @@ export function App() {
           appTheme={effectiveTerminalTheme}
           terminalBgColor={settings.terminalBgColor}
           terminalBgOpacity={settings.terminalBgOpacity}
+          terminalBgImage={settings.terminalBgImage}
           allTabs={tabs}
           visibleTabs={visibleTabs}
           activeTabId={activeTabId}
@@ -639,6 +696,42 @@ export function App() {
             setTabs(prev => [...prev, newTab]);
             setActiveTabId(newTab.id);
           }}
+          onOpenClaudeMd={() => {
+            if (!selectedSession) return;
+            const sKey = getSessionKey(selectedSession);
+            const existing = tabs.find(t => t.type === 'claudemd' && t.sessionKey === sKey);
+            if (existing) { setActiveTabId(existing.id); return; }
+            const newTab: TerminalTab = {
+              id: nextTabId(), projectPath: selectedSession.projectPath, sessionKey: sKey,
+              label: 'CLAUDE.md', type: 'claudemd', command: '', initialized: true,
+            };
+            setTabs(prev => [...prev, newTab]);
+            setActiveTabId(newTab.id);
+          }}
+          onOpenUsage={() => {
+            if (!selectedSession) return;
+            const sKey = getSessionKey(selectedSession);
+            const existing = tabs.find(t => t.type === 'usage' && t.sessionKey === sKey);
+            if (existing) { setActiveTabId(existing.id); return; }
+            const newTab: TerminalTab = {
+              id: nextTabId(), projectPath: selectedSession.projectPath, sessionKey: sKey,
+              label: 'Usage', type: 'usage', command: '', initialized: true,
+            };
+            setTabs(prev => [...prev, newTab]);
+            setActiveTabId(newTab.id);
+          }}
+          onOpenClaudeConfig={() => {
+            if (!selectedSession) return;
+            const sKey = getSessionKey(selectedSession);
+            const existing = tabs.find(t => t.type === 'claude-config' && t.sessionKey === sKey);
+            if (existing) { setActiveTabId(existing.id); return; }
+            const newTab: TerminalTab = {
+              id: nextTabId(), projectPath: selectedSession.projectPath, sessionKey: sKey,
+              label: 'Claude config', type: 'claude-config', command: '', initialized: true,
+            };
+            setTabs(prev => [...prev, newTab]);
+            setActiveTabId(newTab.id);
+          }}
           splitView={splitView}
           onToggleSplit={() => setSplitView(p => !p)}
         />
@@ -651,6 +744,7 @@ export function App() {
             locale={locale}
             onRunInShell={handleRunInShell}
             onOpenWorktreeModal={() => setWorktreeOpen(true)}
+            onOpenBranchModal={() => setBranchOpen(true)}
             onOpenDiffTab={(filePath) => {
               if (!selectedSession) return;
               const newTab: TerminalTab = {
@@ -690,6 +784,7 @@ export function App() {
         settings={settings}
         onSave={handleSaveSettings}
         locale={locale}
+        selectedProjectPath={selectedSession?.projectPath}
       />
 
       <NewSessionModal
@@ -725,6 +820,25 @@ export function App() {
           locale={locale}
         />
       )}
+
+      <AboutDialog isOpen={aboutOpen} onClose={() => setAboutOpen(false)} locale={locale} />
+
+      <CommandPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        sessions={activeSessions}
+        onSelectSession={handleSelectSession}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onTriggerAction={(action) => {
+          if (action === 'new-shell') handleAddShellTab();
+          else if (action === 'new-claude') handleAddClaudeTab();
+          else if (action === 'close-tab' && activeTabId) handleCloseTab(activeTabId);
+          else if (action === 'split-view') setSplitView(p => !p);
+        }}
+        onInsertSnippet={(content) => {
+          window.dispatchEvent(new CustomEvent('claude:insert-snippet', { detail: content }));
+        }}
+      />
     </div>
   );
 }

@@ -3,7 +3,8 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import 'xterm/css/xterm.css';
-import { ClaudeSession, TerminalTab, TerminalPreset, AppTheme } from '../types';
+import { ClaudeSession, TerminalTab, TerminalPreset, AppTheme, PromptSnippet, UsageDayBucket } from '../types';
+import { ClaudeConfigStructuredEditor } from './ClaudeConfigStructuredEditor';
 import { Locale, t } from '../i18n';
 import { ClaudeIcon, TerminalIcon } from './Icons';
 
@@ -17,6 +18,7 @@ interface Props {
   appTheme: AppTheme;
   terminalBgColor?: string;
   terminalBgOpacity?: number;
+  terminalBgImage?: string;
   allTabs: TerminalTab[];
   visibleTabs: TerminalTab[];
   activeTabId: string | null;
@@ -27,6 +29,9 @@ interface Props {
   onOpenBranchModal?: () => void;
   onOpenHistory?: () => void;
   onOpenNotes?: () => void;
+  onOpenClaudeMd?: () => void;
+  onOpenUsage?: () => void;
+  onOpenClaudeConfig?: () => void;
   splitView?: boolean;
   onToggleSplit?: () => void;
 }
@@ -40,14 +45,62 @@ interface TermInstance {
 }
 
 export function TerminalPanel({
-  session, branch, locale, isDemo, terminalPreset, terminalFontSize, appTheme, terminalBgColor, terminalBgOpacity, allTabs, visibleTabs, activeTabId,
-  onActivateTab, onCloseTab, onAddShellTab, onAddClaudeTab, onOpenBranchModal, onOpenHistory, onOpenNotes, splitView, onToggleSplit
+  session, branch, locale, isDemo, terminalPreset, terminalFontSize, appTheme, terminalBgColor, terminalBgOpacity, terminalBgImage, allTabs, visibleTabs, activeTabId,
+  onActivateTab, onCloseTab, onAddShellTab, onAddClaudeTab, onOpenBranchModal, onOpenHistory, onOpenNotes, onOpenClaudeMd, onOpenUsage, onOpenClaudeConfig, splitView, onToggleSplit
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef<Map<string, TermInstance>>(new Map());
   const [loadingTabIds, setLoadingTabIds] = useState<Set<string>>(new Set());
   const [tabStatuses, setTabStatuses] = useState<Map<string, 'busy' | 'idle'>>(new Map());
   const busyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
+
+  // Load snippets when dropdown opens
+  useEffect(() => {
+    if (!snippetsOpen) return;
+    window.api.snippetsLoad().then(setSnippets).catch(() => setSnippets([]));
+  }, [snippetsOpen]);
+
+  // Close snippets dropdown on outside click / Escape
+  useEffect(() => {
+    if (!snippetsOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('.snippets-dropdown') && !t.closest('.snippets-trigger')) setSnippetsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSnippetsOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [snippetsOpen]);
+
+  const insertSnippet = (snippet: PromptSnippet) => {
+    if (!activeTabId) return;
+    const inst = instancesRef.current.get(activeTabId);
+    if (!inst || !inst.ptyId) return;
+    window.api.ptyWrite(inst.ptyId, snippet.content);
+    setSnippetsOpen(false);
+  };
+
+  // Listen for snippet insertions triggered from outside (e.g. command palette)
+  useEffect(() => {
+    const onInsert = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail !== 'string' || !activeTabId) return;
+      const inst = instancesRef.current.get(activeTabId);
+      if (!inst || !inst.ptyId) return;
+      window.api.ptyWrite(inst.ptyId, detail);
+    };
+    window.addEventListener('claude:insert-snippet', onInsert);
+    return () => window.removeEventListener('claude:insert-snippet', onInsert);
+  }, [activeTabId]);
+
+  const activeTab = visibleTabs.find(t => t.id === activeTabId);
+  const showSnippetsButton = activeTab?.type === 'claude' || activeTab?.type === 'shell';
 
   // Terminal theme based on preset + app theme
   const getTermTheme = () => {
@@ -140,7 +193,15 @@ export function TerminalPanel({
   // Create/destroy PTY instances — only for initialized non-diff tabs (lazy loading)
   useEffect(() => {
     const current = instancesRef.current;
-    const activeTabs = allTabs.filter(t => t.initialized !== false && t.type !== 'diff' && t.type !== 'history' && t.type !== 'notes');
+    const activeTabs = allTabs.filter(t =>
+      t.initialized !== false &&
+      t.type !== 'diff' &&
+      t.type !== 'history' &&
+      t.type !== 'notes' &&
+      t.type !== 'claudemd' &&
+      t.type !== 'usage' &&
+      t.type !== 'claude-config'
+    );
     const allTabIds = new Set(allTabs.map(tab => tab.id));
 
     for (const [id, inst] of current) {
@@ -293,6 +354,9 @@ export function TerminalPanel({
         if (inst.ptyId) window.api.ptyDestroy(inst.ptyId);
       }
       instancesRef.current.clear();
+      // Clear any pending busy-status timers so they don't fire after unmount
+      for (const timer of busyTimersRef.current.values()) clearTimeout(timer);
+      busyTimersRef.current.clear();
     };
   }, []);
 
@@ -310,6 +374,29 @@ export function TerminalPanel({
     );
   }
 
+  // Session selected but no tabs open — show the friendly placeholder instead of an empty terminal area
+  if (visibleTabs.length === 0) {
+    return (
+      <div className="center-panel">
+        <div className="terminal-placeholder">
+          <div className="placeholder-icon">&#9002;</div>
+          <div className="placeholder-text">{session.customName || session.projectName}</div>
+          <div className="placeholder-hint">{t(locale, 'terminal.noTabs')}</div>
+          <div className="placeholder-actions">
+            <button className="settings-btn primary" onClick={onAddClaudeTab}>
+              <ClaudeIcon size={14} />
+              <span style={{ marginLeft: 6 }}>+ Claude</span>
+            </button>
+            <button className="settings-btn secondary" onClick={onAddShellTab}>
+              <TerminalIcon size={14} />
+              <span style={{ marginLeft: 6 }}>+ Terminal</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Demo mode: simplified render
   if (isDemo && session) {
     return (
@@ -317,7 +404,7 @@ export function TerminalPanel({
         <div className="terminal-header">
           <div className="terminal-header-left">
             <span className="terminal-project-name">{session.projectName}</span>
-            {branch && <span className="terminal-branch" onClick={onOpenBranchModal} style={{ cursor: 'pointer' }} title="Switch branch">{branch}</span>}
+            {branch && <span className="terminal-branch">{branch}</span>}
           </div>
           <span className="terminal-pid">PID: {session.pid > 0 ? session.pid : '---'}</span>
         </div>
@@ -361,12 +448,46 @@ export function TerminalPanel({
 
   return (
     <div className="center-panel">
+      <div className="session-fade-wrap" key={session.conversationId || session.projectPath}>
       <div className="terminal-header">
         <div className="terminal-header-left">
           <span className="terminal-project-name">{session.projectName}</span>
-          {branch && <span className="terminal-branch" onClick={onOpenBranchModal} style={{ cursor: 'pointer' }} title="Switch branch">{branch}</span>}
+          {branch && <span className="terminal-branch">{branch}</span>}
         </div>
-        <span className="terminal-pid">PID: {session.pid > 0 ? session.pid : '---'}</span>
+        <div className="terminal-header-right">
+          {showSnippetsButton && (
+            <div style={{ position: 'relative' }}>
+              <button
+                className="snippets-trigger"
+                onClick={() => setSnippetsOpen(p => !p)}
+                title={t(locale, 'terminal.snippets')}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                <span>Snippets</span>
+              </button>
+              {snippetsOpen && (
+                <div className="snippets-dropdown">
+                  {snippets.length === 0 ? (
+                    <div className="snippets-dropdown-empty">{t(locale, 'terminal.snippetsEmpty')}</div>
+                  ) : (
+                    snippets.map(s => (
+                      <button
+                        key={s.id}
+                        className="snippets-dropdown-item"
+                        onClick={() => insertSnippet(s)}
+                        title={s.content}
+                      >
+                        <span className="snippets-dropdown-title">{s.title || '(untitled)'}</span>
+                        <span className="snippets-dropdown-preview">{s.content.slice(0, 60)}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <span className="terminal-pid">PID: {session.pid > 0 ? session.pid : '---'}</span>
+        </div>
       </div>
 
       <div className="tab-bar">
@@ -381,6 +502,9 @@ export function TerminalPanel({
                tab.type === 'diff' ? <span style={{ fontSize: 10, color: 'var(--blue)' }}>&#916;</span> :
                tab.type === 'history' ? <span style={{ fontSize: 10 }}>&#128337;</span> :
                tab.type === 'notes' ? <span style={{ fontSize: 10 }}>&#128221;</span> :
+               tab.type === 'claudemd' ? <span style={{ fontSize: 10, color: 'var(--accent)' }}>M↓</span> :
+               tab.type === 'usage' ? <span style={{ fontSize: 10, color: 'var(--green)' }}>📊</span> :
+               tab.type === 'claude-config' ? <span style={{ fontSize: 10, color: '#ffb044' }}>⚙</span> :
                <TerminalIcon size={12} />}
             </span>
             <span className="tab-label">{tab.label}</span>
@@ -414,6 +538,24 @@ export function TerminalPanel({
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>+ History</span>
           </button>
+          {onOpenClaudeMd && (
+            <button className="tab-add tab-add-claudemd" onClick={onOpenClaudeMd}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span>+ CLAUDE.md</span>
+            </button>
+          )}
+          {onOpenUsage && (
+            <button className="tab-add tab-add-usage" onClick={onOpenUsage}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M18 12V8"/><path d="M14 16v-4"/><path d="M10 16V6"/><path d="M6 16v-2"/></svg>
+              <span>+ Usage</span>
+            </button>
+          )}
+          {onOpenClaudeConfig && (
+            <button className="tab-add tab-add-claude-config" onClick={onOpenClaudeConfig}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+              <span>+ Claude config</span>
+            </button>
+          )}
           {visibleTabs.length >= 2 && (
             <button className={`tab-add ${splitView ? 'tab-split-active' : ''}`} onClick={onToggleSplit} title="Split view (Cmd+\\)">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
@@ -421,9 +563,15 @@ export function TerminalPanel({
           )}
         </div>
       </div>
+      </div>
 
       <div className="terminal-container" ref={containerRef} style={{
         ...(terminalBgColor ? { background: terminalBgColor } : {}),
+        ...(terminalBgImage ? {
+          backgroundImage: `url("file://${terminalBgImage.replace(/"/g, '%22')}")`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        } : {}),
         ...(terminalBgOpacity && terminalBgOpacity < 100 ? { opacity: terminalBgOpacity / 100 } : {}),
       }}>
         {/* Loading overlay */}
@@ -444,6 +592,18 @@ export function TerminalPanel({
         {/* Notes tab views */}
         {visibleTabs.filter(tab => tab.type === 'notes' && tab.id === activeTabId).map(tab => (
           <NotesTabView key={tab.id} projectPath={tab.projectPath} />
+        ))}
+        {/* CLAUDE.md tab views */}
+        {visibleTabs.filter(tab => tab.type === 'claudemd' && tab.id === activeTabId).map(tab => (
+          <ClaudeMdTabView key={tab.id} projectPath={tab.projectPath} locale={locale} />
+        ))}
+        {/* Usage tab views */}
+        {visibleTabs.filter(tab => tab.type === 'usage' && tab.id === activeTabId).map(tab => (
+          <UsageTabView key={tab.id} projectPath={tab.projectPath} locale={locale} />
+        ))}
+        {/* Project Claude config tab views */}
+        {visibleTabs.filter(tab => tab.type === 'claude-config' && tab.id === activeTabId).map(tab => (
+          <ClaudeConfigTabView key={tab.id} projectPath={tab.projectPath} locale={locale} />
         ))}
       </div>
     </div>
@@ -512,6 +672,368 @@ function HistoryTabView({ projectPath, sessionId, locale }: { projectPath: strin
           <div className="history-text">{msg.text}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Usage chart — daily tokens / messages / tools, SVG bar chart
+function UsageTabView({ projectPath, locale }: { projectPath: string; locale: Locale }) {
+  const [series, setSeries] = useState<UsageDayBucket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [days, setDays] = useState<number>(30);
+  const [metric, setMetric] = useState<'totalTokens' | 'messages' | 'tools' | 'sessions' | 'cost'>('totalTokens');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    window.api.usageHistory(projectPath, days).then(res => {
+      if (cancelled) return;
+      if (res.ok && res.series) {
+        setSeries(res.series);
+      } else {
+        setError(res.error || 'Failed to load');
+      }
+      setLoading(false);
+    }).catch(e => {
+      if (!cancelled) { setError(String(e)); setLoading(false); }
+    });
+    return () => { cancelled = true; };
+  }, [projectPath, days]);
+
+  // Fill missing days with zeros for a continuous chart
+  const continuous = (() => {
+    const map = new Map(series.map(b => [b.day, b]));
+    const out: UsageDayBucket[] = [];
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      out.push(map.get(key) || { day: key, messages: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0, tools: 0, sessions: 0 });
+    }
+    return out;
+  })();
+
+  const max = Math.max(1, ...continuous.map(b => b[metric] as number));
+  const totals = continuous.reduce((acc, b) => ({
+    messages: acc.messages + b.messages,
+    totalTokens: acc.totalTokens + b.totalTokens,
+    inputTokens: acc.inputTokens + b.inputTokens,
+    outputTokens: acc.outputTokens + b.outputTokens,
+    cost: acc.cost + b.cost,
+    tools: acc.tools + b.tools,
+    sessions: acc.sessions + b.sessions,
+  }), { messages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, cost: 0, tools: 0, sessions: 0 });
+
+  const formatNumber = (n: number) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  const formatCost = (n: number) => '$' + (n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2));
+
+  const W = 800;
+  const H = 240;
+  const PAD_LEFT = 50;
+  const PAD_RIGHT = 12;
+  const PAD_TOP = 16;
+  const PAD_BOT = 32;
+  const chartW = W - PAD_LEFT - PAD_RIGHT;
+  const chartH = H - PAD_TOP - PAD_BOT;
+  const barW = chartW / continuous.length;
+
+  return (
+    <div className="usage-tab-content">
+      <div className="usage-header">
+        <div>
+          <h3 className="usage-title">{t(locale, 'usage.title')}</h3>
+          <p className="usage-subtitle">{projectPath}</p>
+        </div>
+        <div className="usage-controls">
+          <select className="usage-select" value={days} onChange={e => setDays(parseInt(e.target.value))}>
+            <option value={7}>{t(locale, 'usage.last7')}</option>
+            <option value={14}>{t(locale, 'usage.last14')}</option>
+            <option value={30}>{t(locale, 'usage.last30')}</option>
+            <option value={90}>{t(locale, 'usage.last90')}</option>
+          </select>
+          <select className="usage-select" value={metric} onChange={e => setMetric(e.target.value as any)}>
+            <option value="totalTokens">{t(locale, 'usage.metricTokens')}</option>
+            <option value="cost">{t(locale, 'usage.metricCost')}</option>
+            <option value="messages">{t(locale, 'usage.metricMessages')}</option>
+            <option value="tools">{t(locale, 'usage.metricTools')}</option>
+            <option value="sessions">{t(locale, 'usage.metricSessions')}</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="usage-stats">
+        <div className="usage-stat">
+          <span className="usage-stat-label">{t(locale, 'usage.metricCost')}</span>
+          <span className="usage-stat-value usage-stat-cost">{formatCost(totals.cost)}</span>
+          <span className="usage-stat-sub">{t(locale, 'usage.costEstimate')}</span>
+        </div>
+        <div className="usage-stat">
+          <span className="usage-stat-label">{t(locale, 'usage.metricTokens')}</span>
+          <span className="usage-stat-value">{formatNumber(totals.totalTokens)}</span>
+          <span className="usage-stat-sub">{formatNumber(totals.inputTokens)} in / {formatNumber(totals.outputTokens)} out</span>
+        </div>
+        <div className="usage-stat">
+          <span className="usage-stat-label">{t(locale, 'usage.metricMessages')}</span>
+          <span className="usage-stat-value">{formatNumber(totals.messages)}</span>
+        </div>
+        <div className="usage-stat">
+          <span className="usage-stat-label">{t(locale, 'usage.metricTools')}</span>
+          <span className="usage-stat-value">{formatNumber(totals.tools)}</span>
+        </div>
+        <div className="usage-stat">
+          <span className="usage-stat-label">{t(locale, 'usage.metricSessions')}</span>
+          <span className="usage-stat-value">{formatNumber(totals.sessions)}</span>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="usage-empty">{t(locale, 'status.loading')}</div>
+      ) : error ? (
+        <div className="usage-empty">{error}</div>
+      ) : (
+        <svg className="usage-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+          {/* Y axis labels */}
+          {[0, 0.25, 0.5, 0.75, 1].map(tick => {
+            const y = PAD_TOP + chartH - chartH * tick;
+            const value = max * tick;
+            const label = metric === 'cost' ? formatCost(value) : formatNumber(value);
+            return (
+              <g key={tick}>
+                <line x1={PAD_LEFT} y1={y} x2={W - PAD_RIGHT} y2={y} stroke="var(--border)" strokeWidth="1" strokeDasharray="2 4" />
+                <text x={PAD_LEFT - 6} y={y + 3} fontSize="9" fill="var(--text-muted)" textAnchor="end">{label}</text>
+              </g>
+            );
+          })}
+
+          {/* Bars */}
+          {continuous.map((b, i) => {
+            const value = b[metric] as number;
+            const h = (value / max) * chartH;
+            const x = PAD_LEFT + i * barW + 1;
+            const y = PAD_TOP + chartH - h;
+            return (
+              <rect
+                key={b.day}
+                x={x}
+                y={y}
+                width={Math.max(1, barW - 2)}
+                height={Math.max(0, h)}
+                fill="var(--accent)"
+                opacity="0.85"
+              >
+                <title>{b.day}: {metric === 'cost' ? formatCost(value) : formatNumber(value)}</title>
+              </rect>
+            );
+          })}
+
+          {/* X axis labels (every ~Nth day) */}
+          {continuous.map((b, i) => {
+            const step = Math.ceil(continuous.length / 8);
+            if (i % step !== 0 && i !== continuous.length - 1) return null;
+            const x = PAD_LEFT + i * barW + barW / 2;
+            return (
+              <text key={b.day} x={x} y={H - 12} fontSize="9" fill="var(--text-muted)" textAnchor="middle">
+                {b.day.slice(5)}
+              </text>
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// Project Claude Code config editor — edits <projectPath>/.claude/settings.json
+function ClaudeConfigTabView({ projectPath, locale }: { projectPath: string; locale: Locale }) {
+  const [content, setContent] = useState('');
+  const [filePath, setFilePath] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [dirty, setDirty] = useState(false);
+  const [status, setStatus] = useState<{ kind: 'idle' | 'saved' | 'error'; message?: string }>({ kind: 'idle' });
+  const [scope, setScope] = useState<'project' | 'project-local'>('project');
+  const [view, setView] = useState<'structured' | 'raw'>('structured');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setDirty(false);
+    setStatus({ kind: 'idle' });
+    window.api.claudeConfigLoad(scope, projectPath).then(res => {
+      if (cancelled) return;
+      setContent(res.exists ? res.content : '{}');
+      setFilePath(res.path);
+      setLoading(false);
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectPath, scope]);
+
+  const parseConfig = (): any => {
+    try { return JSON.parse(content || '{}'); } catch { return null; }
+  };
+  const writeConfig = (obj: any) => {
+    setContent(JSON.stringify(obj, null, 2));
+    setDirty(true);
+    setStatus({ kind: 'idle' });
+  };
+
+  const handleSave = async () => {
+    const res = await window.api.claudeConfigSave(scope, content, projectPath);
+    if (res.ok) {
+      setDirty(false);
+      setStatus({ kind: 'saved' });
+      setTimeout(() => setStatus({ kind: 'idle' }), 2500);
+    } else {
+      setStatus({ kind: 'error', message: res.error || 'Save failed' });
+    }
+  };
+
+  const handleFormat = () => {
+    try {
+      const parsed = JSON.parse(content);
+      setContent(JSON.stringify(parsed, null, 2));
+      setDirty(true);
+      setStatus({ kind: 'idle' });
+    } catch (e: any) {
+      setStatus({ kind: 'error', message: `Invalid JSON: ${e.message}` });
+    }
+  };
+
+  return (
+    <div className="claude-config-tab-content">
+      <div className="claudemd-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, overflow: 'hidden' }}>
+          <select
+            value={scope}
+            onChange={e => setScope(e.target.value as 'project' | 'project-local')}
+            className="usage-select"
+            style={{ fontSize: 10 }}
+          >
+            <option value="project">.claude/settings.json</option>
+            <option value="project-local">.claude/settings.local.json</option>
+          </select>
+          <span className="claudemd-path" title={filePath}>{filePath}</span>
+        </div>
+        <div className="settings-radio-group" style={{ margin: 0 }}>
+          <label className={`settings-radio ${view === 'structured' ? 'active' : ''}`} style={{ padding: '4px 10px' }}>
+            <input type="radio" name="cc-view-tab" checked={view === 'structured'} onChange={() => setView('structured')} />
+            {t(locale, 'settings.claudeCodeViewStructured')}
+          </label>
+          <label className={`settings-radio ${view === 'raw' ? 'active' : ''}`} style={{ padding: '4px 10px' }}>
+            <input type="radio" name="cc-view-tab" checked={view === 'raw'} onChange={() => setView('raw')} />
+            {t(locale, 'settings.claudeCodeViewRaw')}
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {view === 'raw' && (
+            <button className="settings-btn secondary" style={{ padding: '4px 10px', fontSize: 11 }} onClick={handleFormat} disabled={loading}>
+              {t(locale, 'settings.claudeCodeFormat')}
+            </button>
+          )}
+          <button className="settings-btn primary" style={{ padding: '4px 10px', fontSize: 11 }} onClick={handleSave} disabled={!dirty || loading}>
+            {t(locale, 'settings.save')}
+          </button>
+        </div>
+      </div>
+      <div className="claude-config-tab-body">
+        {view === 'raw' && (
+          <textarea
+            className="claudemd-textarea"
+            value={content}
+            spellCheck={false}
+            onChange={e => { setContent(e.target.value); setDirty(true); setStatus({ kind: 'idle' }); }}
+            placeholder={loading ? 'Loading...' : '{}'}
+          />
+        )}
+        {view === 'structured' && (() => {
+          const cfg = parseConfig();
+          if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+            return (
+              <div className="claude-config-status error" style={{ padding: 12 }}>
+                {t(locale, 'settings.claudeCodeInvalidJson')}
+              </div>
+            );
+          }
+          return <ClaudeConfigStructuredEditor cfg={cfg} onChange={writeConfig} locale={locale} />;
+        })()}
+      </div>
+      {status.kind === 'saved' && (
+        <div className="claude-config-status success">✓ {t(locale, 'settings.claudeCodeSaved')}</div>
+      )}
+      {status.kind === 'error' && (
+        <div className="claude-config-status error">{status.message}</div>
+      )}
+    </div>
+  );
+}
+
+// CLAUDE.md viewer/editor — reads/writes <projectPath>/CLAUDE.md
+function ClaudeMdTabView({ projectPath, locale }: { projectPath: string; locale: Locale }) {
+  const [text, setText] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [exists, setExists] = useState(false);
+  const [filePath, setFilePath] = useState('');
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const saveTimer = useRef<number | null>(null);
+  // Refs hold the latest value so the cleanup effect always reads fresh state
+  // without having to list `text` in its deps array (which would re-fire on every keystroke).
+  const textRef = useRef('');
+  const projectPathRef = useRef(projectPath);
+
+  useEffect(() => { textRef.current = text; }, [text]);
+  useEffect(() => { projectPathRef.current = projectPath; }, [projectPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.api.claudeMdLoad(projectPath).then(res => {
+      if (cancelled) return;
+      setText(res.content || '');
+      setExists(res.exists);
+      setFilePath(res.path);
+      setLoaded(true);
+    }).catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [projectPath]);
+
+  const handleChange = (val: string) => {
+    setText(val);
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      window.api.claudeMdSave(projectPathRef.current, val).then(res => {
+        if (res.ok) { setExists(true); setSavedAt(new Date()); }
+      }).catch(() => {});
+    }, 500);
+  };
+
+  // Flush pending save on unmount only (not on text change)
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        window.api.claudeMdSave(projectPathRef.current, textRef.current).catch(() => {});
+      }
+    };
+  }, []);
+
+  return (
+    <div className="claudemd-tab-content">
+      <div className="claudemd-header">
+        <span className="claudemd-path" title={filePath}>{filePath}</span>
+        <span className="claudemd-status">
+          {!exists && !text ? t(locale, 'claudemd.empty') :
+           savedAt ? `${t(locale, 'claudemd.savedAt')} ${savedAt.toLocaleTimeString()}` :
+           exists ? t(locale, 'claudemd.loaded') : ''}
+        </span>
+      </div>
+      <textarea
+        className="claudemd-textarea"
+        value={text}
+        onChange={e => handleChange(e.target.value)}
+        placeholder={loaded ? t(locale, 'claudemd.placeholder') : 'Loading...'}
+        spellCheck={false}
+      />
     </div>
   );
 }

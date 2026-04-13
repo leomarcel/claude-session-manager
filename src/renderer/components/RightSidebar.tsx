@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ClaudeSession, ModifiedFile, AppSettings, IDEInfo } from '../types';
 import { Locale, t } from '../i18n';
-import { GitIcon, PRIcon, WorktreeIcon, PhpStormIcon, VSCodeIcon, IntelliJIcon, FinderIcon, TerminalIcon } from './Icons';
+import { GitIcon, PRIcon, WorktreeIcon, BranchIcon, PhpStormIcon, VSCodeIcon, IntelliJIcon, FinderIcon, TerminalIcon } from './Icons';
 
 interface Props {
   session: ClaudeSession | null;
@@ -10,6 +10,7 @@ interface Props {
   locale: Locale;
   onRunInShell?: (command: string) => void;
   onOpenWorktreeModal?: () => void;
+  onOpenBranchModal?: () => void;
   onOpenDiffTab?: (filePath: string) => void;
 }
 
@@ -27,7 +28,7 @@ function getIDEIcon(ideId: string, size = 16): React.ReactNode {
   }
 }
 
-export function RightSidebar({ session, modifiedFiles, settings, locale, onRunInShell, onOpenWorktreeModal, onOpenDiffTab }: Props) {
+export function RightSidebar({ session, modifiedFiles, settings, locale, onRunInShell, onOpenWorktreeModal, onOpenBranchModal, onOpenDiffTab }: Props) {
   const [filePicker, setFilePicker] = useState<{ filePath: string; x: number; y: number } | null>(null);
   const [enabledIDEs, setEnabledIDEs] = useState<IDEInfo[]>([]);
 
@@ -86,6 +87,11 @@ export function RightSidebar({ session, modifiedFiles, settings, locale, onRunIn
   };
 
   const builtinActions: Record<string, ActionDef> = {
+    branch: {
+      id: 'branch', name: t(locale, 'actions.branch'), desc: t(locale, 'actions.branchDesc'),
+      icon: <BranchIcon size={16} />, iconClass: 'branch',
+      action: () => onOpenBranchModal?.()
+    },
     commit: {
       id: 'commit', name: t(locale, 'actions.commit'), desc: t(locale, 'actions.commitDesc'),
       icon: <GitIcon size={16} />, iconClass: 'git',
@@ -144,6 +150,7 @@ export function RightSidebar({ session, modifiedFiles, settings, locale, onRunIn
   // Fallback: if no actions configured, show defaults
   if (visibleActions.length === 0) {
     visibleActions.push(
+      builtinActions.branch,
       builtinActions.commit,
       builtinActions.createPR,
       builtinActions.worktree,

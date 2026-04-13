@@ -32,6 +32,11 @@ export interface SessionFlag {
   order: number;
 }
 
+export interface ShortcutBinding {
+  id: string;
+  accelerator: string;
+}
+
 export interface AppSettings {
   locale: 'fr' | 'en';
   refreshInterval: number;
@@ -47,11 +52,13 @@ export interface AppSettings {
   externalTerminal: ExternalTerminal;
   terminalBgColor: string;
   terminalBgOpacity: number;
+  terminalBgImage: string;
   notificationsEnabled: boolean;
   demoMode: boolean;
   trayEnabled: boolean;
   autoUpdate: boolean;
   flags: SessionFlag[];
+  shortcuts: ShortcutBinding[];
   ides: IDEInfo[];
   quickActions: QuickAction[];
 }
@@ -68,11 +75,12 @@ const DEFAULT_IDES: Omit<IDEInfo, 'installed'>[] = [
 ];
 
 const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
-  { id: 'commit', type: 'builtin', visible: true, order: 0 },
-  { id: 'createPR', type: 'builtin', visible: true, order: 1 },
-  { id: 'worktree', type: 'builtin', visible: true, order: 2 },
-  { id: 'finder', type: 'builtin', visible: true, order: 3 },
-  { id: 'terminal', type: 'builtin', visible: true, order: 4 },
+  { id: 'branch', type: 'builtin', visible: true, order: 0 },
+  { id: 'commit', type: 'builtin', visible: true, order: 1 },
+  { id: 'createPR', type: 'builtin', visible: true, order: 2 },
+  { id: 'worktree', type: 'builtin', visible: true, order: 3 },
+  { id: 'finder', type: 'builtin', visible: true, order: 4 },
+  { id: 'terminal', type: 'builtin', visible: true, order: 5 },
 ];
 
 const DEFAULT_FLAGS: SessionFlag[] = [
@@ -80,6 +88,18 @@ const DEFAULT_FLAGS: SessionFlag[] = [
   { id: 'doing',   name: 'En cours', color: '#64b5f6', order: 1 },
   { id: 'review',  name: 'A review', color: '#ffb044', order: 2 },
   { id: 'done',    name: 'Fait',     color: '#50e3a0', order: 3 },
+];
+
+export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
+  { id: 'session-1',  accelerator: 'Cmd+1' },
+  { id: 'session-2',  accelerator: 'Cmd+2' },
+  { id: 'session-3',  accelerator: 'Cmd+3' },
+  { id: 'session-4',  accelerator: 'Cmd+4' },
+  { id: 'session-5',  accelerator: 'Cmd+5' },
+  { id: 'new-shell',  accelerator: 'Cmd+T' },
+  { id: 'new-claude', accelerator: 'Cmd+Shift+T' },
+  { id: 'close-tab',  accelerator: 'Cmd+W' },
+  { id: 'split-view', accelerator: 'Cmd+\\' },
 ];
 
 export class SettingsStore {
@@ -126,11 +146,13 @@ export class SettingsStore {
       externalTerminal: 'terminal' as ExternalTerminal,
       terminalBgColor: '',
       terminalBgOpacity: 100,
+      terminalBgImage: '',
       notificationsEnabled: true,
       demoMode: false,
       trayEnabled: true,
       autoUpdate: true,
       flags: DEFAULT_FLAGS.map(f => ({ ...f })),
+      shortcuts: DEFAULT_SHORTCUTS.map(s => ({ ...s })),
       ides,
       quickActions: [...DEFAULT_QUICK_ACTIONS, ...ideActions],
     };
@@ -169,10 +191,12 @@ export class SettingsStore {
     if (saved.externalTerminal !== undefined) merged.externalTerminal = saved.externalTerminal;
     if (saved.terminalBgColor !== undefined) merged.terminalBgColor = saved.terminalBgColor;
     if (saved.terminalBgOpacity !== undefined) merged.terminalBgOpacity = saved.terminalBgOpacity;
+    if (saved.terminalBgImage !== undefined) merged.terminalBgImage = saved.terminalBgImage;
     if (saved.notificationsEnabled !== undefined) merged.notificationsEnabled = saved.notificationsEnabled;
     if (saved.demoMode !== undefined) merged.demoMode = saved.demoMode;
     if (saved.trayEnabled !== undefined) merged.trayEnabled = saved.trayEnabled;
     if (Array.isArray(saved.flags) && saved.flags.length > 0) merged.flags = saved.flags;
+    if (Array.isArray(saved.shortcuts) && saved.shortcuts.length > 0) merged.shortcuts = saved.shortcuts;
 
     // Merge IDEs: keep saved enabled state, but update installed status
     if (saved.ides) {
@@ -185,17 +209,24 @@ export class SettingsStore {
       });
     }
 
-    // Merge quick actions: keep saved visibility and order
+    // Merge quick actions: keep saved visibility and order, but inject any
+    // new built-in defaults at their default position (so newly-shipped actions
+    // like `branch` land where they're meant to be, not at the end).
     if (saved.quickActions) {
       const savedMap = new Map(saved.quickActions.map(a => [a.id, a]));
-      // Keep saved actions order, add new defaults at the end
-      const existing = saved.quickActions.filter(a =>
-        defaults.quickActions.some(d => d.id === a.id) || a.type === 'ide'
-      );
-      const newActions = defaults.quickActions.filter(d =>
-        !savedMap.has(d.id)
-      );
-      merged.quickActions = [...existing, ...newActions];
+      const existing = saved.quickActions
+        .filter(a => defaults.quickActions.some(d => d.id === a.id) || a.type === 'ide')
+        .sort((a, b) => a.order - b.order);
+      const missing = defaults.quickActions
+        .filter(d => !savedMap.has(d.id))
+        .sort((a, b) => a.order - b.order);
+
+      const result: QuickAction[] = [...existing];
+      for (const m of missing) {
+        const idx = Math.min(m.order, result.length);
+        result.splice(idx, 0, m);
+      }
+      merged.quickActions = result.map((a, i) => ({ ...a, order: i }));
     }
 
     return merged;

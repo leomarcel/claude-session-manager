@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ClaudeSession, SessionSortMode, LiveStatus, SessionFlag } from '../types';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { ClaudeSession, SessionSortMode, LiveStatus, SessionFlag, ConversationMatch } from '../types';
 import { Locale, t } from '../i18n';
 import { ClaudeIcon, SessionIcon } from './Icons';
 
@@ -16,6 +16,8 @@ interface Props {
   onViewHistory: (session: ClaudeSession) => void;
   onReconnect: (session: ClaudeSession) => void;
   onSetFlag: (key: string, flagId: string | null) => void;
+  onTogglePin: (key: string, pinned: boolean) => void;
+  onExportMarkdown: (session: ClaudeSession) => void;
   flags: SessionFlag[];
   onNewSession: () => void;
   onCreateSessionInProject: (projectPath: string) => void;
@@ -59,7 +61,7 @@ function getSessionDisplayName(session: ClaudeSession): string {
 
 export function SessionSidebar({
   sessions, archivedSessions, selectedSession,
-  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onReconnect, onSetFlag, flags, onNewSession, onCreateSessionInProject, sortMode, locale
+  onSelectSession, onRefresh, onRename, onArchive, onUnarchive, onDelete, onViewHistory, onReconnect, onSetFlag, onTogglePin, onExportMarkdown, flags, onNewSession, onCreateSessionInProject, sortMode, locale
 }: Props) {
   const sortedFlags = [...flags].sort((a, b) => a.order - b.order);
   const flagById = (id?: string) => id ? sortedFlags.find(f => f.id === id) : undefined;
@@ -71,10 +73,87 @@ export function SessionSidebar({
   const [filterProjects, setFilterProjects] = useState<Set<string>>(new Set());
   const [filterDate, setFilterDate] = useState<'all' | 'today' | 'week'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchInContent, setSearchInContent] = useState(false);
+  const [contentMatches, setContentMatches] = useState<Map<string, ConversationMatch>>(new Map());
+  const [contentSearching, setContentSearching] = useState(false);
   const [filterStatuses, setFilterStatuses] = useState<Set<LiveStatus>>(new Set());
   const [groupByStatus, setGroupByStatus] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenuStyle, setContextMenuStyle] = useState<React.CSSProperties>({});
+
+  const toggleMultiSelect = (key: string) => {
+    setMultiSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const clearMultiSelect = () => setMultiSelected(new Set());
+
+  const handleBulkArchive = async () => {
+    for (const key of Array.from(multiSelected)) {
+      await onArchive(key);
+    }
+    clearMultiSelect();
+  };
+  const handleBulkDelete = () => {
+    const msg = t(locale, 'sidebar.bulkDeleteConfirm').replace('{count}', String(multiSelected.size));
+    if (!window.confirm(msg)) return;
+    Array.from(multiSelected).forEach(key => onDelete(key));
+    clearMultiSelect();
+  };
+  const handleBulkSetFlag = (flagId: string | null) => {
+    Array.from(multiSelected).forEach(key => onSetFlag(key, flagId));
+    clearMultiSelect();
+  };
+
+  // Debounced full-text search inside conversations
+  useEffect(() => {
+    if (!searchInContent || !searchQuery || searchQuery.trim().length < 2) {
+      setContentMatches(new Map());
+      return;
+    }
+    let cancelled = false;
+    setContentSearching(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await window.api.searchConversations(searchQuery);
+        if (cancelled) return;
+        if (res.ok && res.matches) {
+          const map = new Map<string, ConversationMatch>();
+          for (const m of res.matches) {
+            map.set(m.conversationId, m);
+            map.set(`${m.projectPath}:fallback`, m);
+          }
+          setContentMatches(map);
+        }
+      } catch {}
+      if (!cancelled) setContentSearching(false);
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, searchInContent]);
+
+  // Reposition the context menu after mount so it never overflows the viewport
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) {
+      setContextMenuStyle({});
+      return;
+    }
+    const rect = contextMenuRef.current.getBoundingClientRect();
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let top = contextMenu.y;
+    let left = contextMenu.x;
+    if (top + rect.height + margin > vh) top = Math.max(margin, vh - rect.height - margin);
+    if (left + rect.width + margin > vw) left = Math.max(margin, vw - rect.width - margin);
+    setContextMenuStyle({ top, left });
+  }, [contextMenu]);
 
   // Close the context menu on any outside click, Escape, or scroll
   useEffect(() => {
@@ -144,11 +223,24 @@ export function SessionSidebar({
     const displayName = getSessionDisplayName(session);
     const isEditing = editingPath === sessionKey(session);
 
+    const sKey = sessionKey(session);
+    const isMultiSelected = multiSelected.has(sKey);
+
     return (
       <div
-        key={sessionKey(session)}
-        className={`session-item ${selectedSession?.projectPath === session.projectPath && selectedSession?.conversationId === session.conversationId ? 'active' : ''} ${isArchived ? 'archived' : ''}`}
-        onClick={() => onSelectSession(session)}
+        key={sKey}
+        className={`session-item ${selectedSession?.projectPath === session.projectPath && selectedSession?.conversationId === session.conversationId ? 'active' : ''} ${isArchived ? 'archived' : ''} ${isMultiSelected ? 'multi-selected' : ''}`}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey) {
+            toggleMultiSelect(sKey);
+          } else if (multiSelected.size > 0) {
+            // Single click while multi-select active: clear and select normally
+            clearMultiSelect();
+            onSelectSession(session);
+          } else {
+            onSelectSession(session);
+          }
+        }}
         onContextMenu={(e) => handleContextMenu(e, session)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -167,14 +259,21 @@ export function SessionSidebar({
               placeholder={t(locale, 'sidebar.renamePlaceholder')}
             />
           ) : (
-            <span
-              className="session-name"
-              style={{ marginBottom: 0 }}
-              onDoubleClick={(e) => { e.stopPropagation(); startRename(session); }}
-              title={`${t(locale, 'sidebar.renameTooltip')}\n${session.projectPath}`}
-            >
-              {displayName}
-            </span>
+            <>
+              {session.pinned && (
+                <span className="session-pin-icon" title={t(locale, 'sidebar.pinned')}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" strokeWidth="2"/><path d="M5 17h14l-1.5-3.5a4 4 0 0 1-.5-2V7a3 3 0 0 0-3-3h-4a3 3 0 0 0-3 3v4.5a4 4 0 0 1-.5 2L5 17z"/></svg>
+                </span>
+              )}
+              <span
+                className="session-name"
+                style={{ marginBottom: 0 }}
+                onDoubleClick={(e) => { e.stopPropagation(); startRename(session); }}
+                title={`${t(locale, 'sidebar.renameTooltip')}\n${session.projectPath}`}
+              >
+                {displayName}
+              </span>
+            </>
           )}
           {session.isWorktree && <span className="worktree-badge">worktree</span>}
         </div>
@@ -228,12 +327,17 @@ export function SessionSidebar({
   const filteredSessions = sessions.filter(s => {
     // Search
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const haystack = [
-        s.projectName, s.projectPath, s.customName || '',
-        s.firstPrompt || '', s.summary || '', s.model
-      ].join(' ').toLowerCase();
-      if (!haystack.includes(q)) return false;
+      if (searchInContent) {
+        // Full-text mode: only sessions whose conversationId appears in content matches
+        if (!s.conversationId || !contentMatches.has(s.conversationId)) return false;
+      } else {
+        const q = searchQuery.toLowerCase();
+        const haystack = [
+          s.projectName, s.projectPath, s.customName || '',
+          s.firstPrompt || '', s.summary || '', s.model
+        ].join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
     }
     // Status filter
     if (filterStatuses.size > 0 && !filterStatuses.has(s.liveStatus || 'disconnected')) return false;
@@ -317,16 +421,57 @@ export function SessionSidebar({
         </div>
       </div>
 
+      {/* Bulk action bar (visible when multi-select active) */}
+      {multiSelected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="bulk-count">{multiSelected.size} {t(locale, 'sidebar.bulkSelected')}</span>
+          <div className="bulk-actions">
+            <button className="bulk-btn" onClick={handleBulkArchive} title={t(locale, 'sidebar.archive')}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            </button>
+            <button className="bulk-btn bulk-btn-danger" onClick={handleBulkDelete} title={t(locale, 'sidebar.deletePermanently')}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+            <select
+              className="bulk-flag-select"
+              value=""
+              onChange={e => {
+                const val = e.target.value;
+                if (val === '__none__') handleBulkSetFlag(null);
+                else if (val) handleBulkSetFlag(val);
+              }}
+              title={t(locale, 'sidebar.setFlag')}
+            >
+              <option value="">{t(locale, 'sidebar.setFlag')}…</option>
+              <option value="__none__">{t(locale, 'sidebar.flagNone')}</option>
+              {sortedFlags.map(f => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+            <button className="bulk-btn bulk-btn-cancel" onClick={clearMultiSelect} title={t(locale, 'sidebar.bulkCancel')}>
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Search bar */}
       <div className="session-search">
         <svg className="session-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input
           className="session-search-input"
           type="text"
-          placeholder={t(locale, 'sidebar.search')}
+          placeholder={searchInContent ? t(locale, 'sidebar.searchContent') : t(locale, 'sidebar.search')}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
         />
+        <button
+          className={`session-search-mode ${searchInContent ? 'active' : ''}`}
+          onClick={() => setSearchInContent(p => !p)}
+          title={t(locale, 'sidebar.searchToggleHint')}
+        >
+          {contentSearching ? '…' : 'Aa'}
+        </button>
         {searchQuery && (
           <button className="session-search-clear" onClick={() => setSearchQuery('')}>&times;</button>
         )}
@@ -484,8 +629,15 @@ export function SessionSidebar({
         <div
           ref={contextMenuRef}
           className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          style={contextMenuStyle.top !== undefined ? contextMenuStyle : { top: contextMenu.y, left: contextMenu.x, visibility: 'hidden' }}
         >
+          <button
+            className="context-menu-item"
+            onClick={() => { onTogglePin(sessionKey(contextMenu.session), !contextMenu.session.pinned); closeContextMenu(); }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill={contextMenu.session.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14l-1.5-3.5a4 4 0 0 1-.5-2V7a3 3 0 0 0-3-3h-4a3 3 0 0 0-3 3v4.5a4 4 0 0 1-.5 2L5 17z"/></svg>
+            {contextMenu.session.pinned ? t(locale, 'sidebar.unpin') : t(locale, 'sidebar.pin')}
+          </button>
           <button
             className="context-menu-item"
             onClick={() => { onViewHistory(contextMenu.session); closeContextMenu(); }}
@@ -499,6 +651,13 @@ export function SessionSidebar({
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
             {t(locale, 'sidebar.reconnect')}
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => { onExportMarkdown(contextMenu.session); closeContextMenu(); }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            {t(locale, 'sidebar.exportMarkdown')}
           </button>
           <div className="context-menu-divider" />
           <button className="context-menu-item" onClick={() => startRename(contextMenu.session)}>

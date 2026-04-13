@@ -52,11 +52,6 @@ contextBridge.exposeInMainWorld('api', {
   settingsReset: () => ipcRenderer.invoke('settings-reset'),
 
   // Updater
-  onUpdateAvailable: (callback: (info: { version: string }) => void) => {
-    const handler = (_event: IpcRendererEvent, info: any) => callback(info);
-    ipcRenderer.on('update-available', handler);
-    return () => { ipcRenderer.removeListener('update-available', handler); };
-  },
   onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
     const handler = (_event: IpcRendererEvent, info: any) => callback(info);
     ipcRenderer.on('update-downloaded', handler);
@@ -67,6 +62,18 @@ contextBridge.exposeInMainWorld('api', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   notesLoad: (projectPath: string) => ipcRenderer.invoke('notes-load', projectPath),
   notesSave: (projectPath: string, content: string) => ipcRenderer.invoke('notes-save', projectPath, content),
+  claudeConfigLoad: (scope: string, projectPath?: string) => ipcRenderer.invoke('claude-config-load', scope, projectPath),
+  claudeConfigSave: (scope: string, content: string, projectPath?: string) => ipcRenderer.invoke('claude-config-save', scope, content, projectPath),
+  claudeMdLoad: (projectPath: string) => ipcRenderer.invoke('claude-md-load', projectPath),
+  claudeMdSave: (projectPath: string, content: string) => ipcRenderer.invoke('claude-md-save', projectPath, content),
+  sessionExportMarkdown: (projectPath: string, conversationId: string) => ipcRenderer.invoke('session-export-markdown', projectPath, conversationId),
+  usageHistory: (projectPath: string, days?: number) => ipcRenderer.invoke('usage-history', projectPath, days),
+  searchConversations: (query: string) => ipcRenderer.invoke('search-conversations', query),
+  snippetsLoad: () => ipcRenderer.invoke('snippets-load'),
+  snippetsSave: (snippets: any) => ipcRenderer.invoke('snippets-save', snippets),
+  dialogSaveFile: (defaultName: string, content: string) => ipcRenderer.invoke('dialog-save-file', defaultName, content),
+  dialogSelectImage: () => ipcRenderer.invoke('dialog-select-image'),
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 
   // Shortcuts
   onShortcut: (callback: (action: string) => void) => {
@@ -104,6 +111,7 @@ contextBridge.exposeInMainWorld('api', {
   sessionMetaArchive: (projectPath: string) => ipcRenderer.invoke('session-meta-archive', projectPath),
   sessionMetaUnarchive: (projectPath: string) => ipcRenderer.invoke('session-meta-unarchive', projectPath),
   sessionMetaSetFlag: (key: string, flagId: string | null) => ipcRenderer.invoke('session-meta-set-flag', key, flagId),
+  sessionMetaSetPinned: (key: string, pinned: boolean) => ipcRenderer.invoke('session-meta-set-pinned', key, pinned),
   sessionKill: (pid: number) => ipcRenderer.invoke('session-kill', pid),
   sessionDelete: (args: { key: string; pid: number; projectPath: string; conversationId?: string }) =>
     ipcRenderer.invoke('session-delete', args),
